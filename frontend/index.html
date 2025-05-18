@@ -14,84 +14,42 @@
      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
      crossorigin=""/>
     <style>
-        /* Custom scrollbar for better aesthetics (optional) */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 10px;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #888;
-            border-radius: 10px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #555;
-        }
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f0f4f8; /* Light blue-gray background */
-        }
-        .filter-card, .map-card, .alerts-summary-card, .current-weather-card {
-            background-color: white;
-            border-radius: 0.75rem; /* 12px */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #555; }
+        body { font-family: 'Inter', sans-serif; background-color: #f0f4f8; }
+        .card-style { 
+            background-color: white; border-radius: 0.75rem; 
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
-        .header-title {
-            color: #1e3a8a; /* Dark blue for title */
-        }
-        .btn-filter {
-            background-color: #3b82f6; /* Blue */
-            color: white;
-        }
-        .btn-filter:hover {
-            background-color: #2563eb;
-        }
-        .alert-card-red {
-            background-color: #fee2e2; /* Light red */
-            border-left: 4px solid #ef4444; /* Red border */
-            color: #b91c1c; /* Dark red text */
-        }
-        .alert-card-yellow {
-            background-color: #fef3c7; /* Light yellow */
-            border-left: 4px solid #f59e0b; /* Yellow border */
-            color: #b45309; /* Dark yellow text */
-        }
-        .alert-card-blue { 
-            background-color: #e0f2fe; /* Light blue */
-            border-left: 4px solid #0ea5e9; /* Blue border */
-            color: #0369a1; /* Dark blue text */
-        }
+        .header-title { color: #1e3a8a; }
+        .btn-filter { background-color: #3b82f6; color: white; }
+        .btn-filter:hover { background-color: #2563eb; }
+        .alert-card-red { background-color: #fee2e2; border-left: 4px solid #ef4444; color: #b91c1c; }
+        .alert-card-yellow { background-color: #fef3c7; border-left: 4px solid #f59e0b; color: #b45309; }
+        .alert-card-blue { background-color: #e0f2fe; border-left: 4px solid #0ea5e9; color: #0369a1; }
         .input-style, .select-style-custom {
-            border-radius: 0.375rem; /* 6px */
-            border: 1px solid #d1d5db; /* Gray border */
-            padding: 0.5rem 0.75rem; /* 8px 12px */
-            width: 100%;
-            background-color: white; 
+            border-radius: 0.375rem; border: 1px solid #d1d5db; padding: 0.5rem 0.75rem; 
+            width: 100%; background-color: white; 
         }
         .select-style-custom {
             appearance: none;
             background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M10 12.586l-4.293-4.293a1 1 0 011.414-1.414L10 10.758l3.879-3.879a1 1 0 111.414 1.414L10 12.586z' clip-rule='evenodd'/%3E%3C/svg%3E");
-            background-repeat: no-repeat;
-            background-position: right 0.5rem center;
-            background-size: 1.5em 1.5em;
-            padding-right: 2.5rem; 
+            background-repeat: no-repeat; background-position: right 0.5rem center;
+            background-size: 1.5em 1.5em; padding-right: 2.5rem; 
         }
         #mapPlaceholder { 
-            min-height: 300px; 
+            min-height: 350px; /* Altura mínima geral */
             background-color: #e5e7eb; 
         }
-        .accordion-icon {
-            transition: transform 0.2s ease-in-out;
-        }
+        .accordion-icon { transition: transform 0.2s ease-in-out; }
+        .forecast-day-card { background-color: #f9fafb; border: 1px solid #e5e7eb; }
     </style>
 </head>
 <body class="text-gray-800">
 
-    <header class="bg-white shadow-md p-4 flex items-center justify-between sticky top-0 z-50">
-        <div class="flex items-center">
+    <header class="bg-white shadow-md p-4 flex items-center justify-between sticky top-0 z-50 h-16"> <div class="flex items-center">
             <button id="menuBtn" class="text-2xl text-gray-600 hover:text-blue-600 md:hidden mr-3">
                 <i class="fas fa-bars"></i>
             </button>
@@ -102,98 +60,105 @@
         </div>
     </header>
 
-    <main class="p-4 md:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
-
-        <aside id="filtersSidebar" class="lg:col-span-3 filter-card p-4 md:p-6 space-y-6 hidden md:block lg:sticky lg:top-20 self-start max-h-[calc(100vh-100px)] overflow-y-auto">
-            <h2 class="text-lg font-semibold text-gray-700 border-b pb-2">Filtros</h2>
-            <div>
-                <label for="dateRangeFilter" class="block text-sm font-medium text-gray-700 mb-1">Período</label>
-                <input type="text" id="dateRangeFilter" name="dateRangeFilter" class="input-style" placeholder="Selecione o período">
-            </div>
-            <div>
-                <button type="button" id="cityFilterHeader" class="flex items-center justify-between w-full py-2 text-sm font-medium text-left text-gray-700 hover:text-blue-600 focus:outline-none">
-                    <span>Cidades</span>
-                    <i id="cityFilterIcon" class="fas fa-chevron-down accordion-icon"></i>
+    <main class="p-4 md:p-6 lg:p-8 space-y-6 mt-16"> <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
+            <aside id="filtersSidebar" class="lg:col-span-3 card-style p-4 md:p-6 space-y-6 hidden md:block lg:sticky lg:top-20 self-start lg:h-[200vh] lg:max-h-[600px] overflow-y-auto"> 
+                <h2 class="text-lg font-semibold text-gray-700 border-b pb-2">Filtros</h2>
+                <div>
+                    <label for="dateRangeFilter" class="block text-sm font-medium text-gray-700 mb-1">Período</label>
+                    <input type="text" id="dateRangeFilter" name="dateRangeFilter" class="input-style" placeholder="Selecione o período">
+                </div>
+                <div>
+                    <button type="button" id="cityFilterHeader" class="flex items-center justify-between w-full py-2 text-sm font-medium text-left text-gray-700 hover:text-blue-600 focus:outline-none">
+                        <span>Cidades</span>
+                        <i id="cityFilterIcon" class="fas fa-chevron-down accordion-icon"></i>
+                    </button>
+                    <div id="cityFilterContainer" class="mt-1 space-y-2 max-h-40 overflow-y-auto border border-gray-300 rounded-md p-2 bg-white hidden">
+                        <p class="text-xs text-gray-500">Carregando cidades...</p>
+                    </div>
+                </div>
+                <div>
+                    <button type="button" id="alertTypeFilterHeader" class="flex items-center justify-between w-full py-2 text-sm font-medium text-left text-gray-700 hover:text-blue-600 focus:outline-none">
+                        <span>Tipos de Alerta</span>
+                        <i id="alertTypeFilterIcon" class="fas fa-chevron-down accordion-icon"></i>
+                    </button>
+                    <div id="alertTypeFilterContainer" class="mt-1 space-y-2 max-h-40 overflow-y-auto border border-gray-300 rounded-md p-2 bg-white hidden">
+                        <p class="text-xs text-gray-500">Carregando tipos...</p>
+                    </div>
+                </div>
+                <button id="applyFiltersBtn" class="w-full btn-filter font-semibold py-2.5 px-4 rounded-md hover:bg-blue-700 transition duration-150 ease-in-out flex items-center justify-center">
+                    <i class="fas fa-filter mr-2"></i> Aplicar Filtros
                 </button>
-                <div id="cityFilterContainer" class="mt-1 space-y-2 max-h-40 overflow-y-auto border border-gray-300 rounded-md p-2 bg-white hidden">
-                    <p class="text-xs text-gray-500">Carregando cidades...</p>
-                </div>
-            </div>
-            <div>
-                <button type="button" id="alertTypeFilterHeader" class="flex items-center justify-between w-full py-2 text-sm font-medium text-left text-gray-700 hover:text-blue-600 focus:outline-none">
-                    <span>Tipos de Alerta</span>
-                    <i id="alertTypeFilterIcon" class="fas fa-chevron-down accordion-icon"></i>
+                 <button id="clearFiltersBtn" class="w-full bg-gray-500 text-white font-semibold py-2.5 px-4 rounded-md hover:bg-gray-600 transition duration-150 ease-in-out flex items-center justify-center mt-2">
+                    <i class="fas fa-times mr-2"></i> Limpar Filtros
                 </button>
-                <div id="alertTypeFilterContainer" class="mt-1 space-y-2 max-h-40 overflow-y-auto border border-gray-300 rounded-md p-2 bg-white hidden">
-                    <p class="text-xs text-gray-500">Carregando tipos...</p>
-                </div>
-            </div>
-            <button id="applyFiltersBtn" class="w-full btn-filter font-semibold py-2.5 px-4 rounded-md hover:bg-blue-700 transition duration-150 ease-in-out flex items-center justify-center">
-                <i class="fas fa-filter mr-2"></i> Aplicar Filtros
-            </button>
-             <button id="clearFiltersBtn" class="w-full bg-gray-500 text-white font-semibold py-2.5 px-4 rounded-md hover:bg-gray-600 transition duration-150 ease-in-out flex items-center justify-center mt-2">
-                <i class="fas fa-times mr-2"></i> Limpar Filtros
-            </button>
-        </aside>
+            </aside>
 
-        <section class="lg:col-span-9 grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-6">
-
-            <div class="xl:col-span-2 map-card p-4 md:p-6">
-                <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Mapa de Alertas da Mesorregião de São José do Rio Preto</h2>
-                <div id="mapPlaceholder" class="h-64 md:h-96 lg:h-[calc(100vh-180px)] rounded-md text-gray-500">
+            <section class="lg:col-span-9 card-style p-4 md:p-6 flex flex-col">
+                <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2 flex-shrink-0">Mapa de Alertas da Mesorregião de São José do Rio Preto</h2>
+                <div id="mapPlaceholder" class="w-full flex-grow rounded-md text-gray-500 h-[55vh] max-h-[600px]"> 
                 </div>
-                <p class="text-xs text-gray-500 mt-2 text-right">
+                <p class="text-xs text-gray-500 mt-2 text-right flex-shrink-0">
                     (C) OpenStreetMap contributors (C) CARTO
                 </p>
+            </section>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+            
+            <div class="card-style p-4 md:p-6 flex flex-col max-h-[450px]"> 
+                <h2 class="text-lg font-semibold text-gray-700 border-b pb-2 mb-3 flex-shrink-0">Resumo dos Alertas</h2>
+                <div id="alertsList" class="space-y-4 flex-grow overflow-y-auto pr-1"> 
+                    <p class="text-sm text-gray-500">Nenhum alerta para exibir com os filtros atuais.</p>
+                </div>
+                <div class="text-center mt-auto pt-3 flex-shrink-0"> 
+                    <a href="#" id="showAllAlertsLink" class="text-sm text-blue-600 hover:underline">Ver todos os alertas</a>
+                </div>
             </div>
 
-            <div class="xl:col-span-1 space-y-4 md:space-y-6 flex flex-col">
-
-                <div class="alerts-summary-card p-4 md:p-6 flex flex-col flex-grow min-h-[300px] max-h-[calc(50vh-40px)] md:max-h-[calc(50vh-60px)]"> 
-                    <h2 class="text-lg font-semibold text-gray-700 border-b pb-2 mb-3 flex-shrink-0">Resumo dos Alertas</h2>
-                    <div id="alertsList" class="space-y-4 flex-grow overflow-y-auto pr-1"> 
-                        <p class="text-sm text-gray-500">Nenhum alerta para exibir com os filtros atuais.</p>
-                    </div>
-                    <div class="text-center mt-auto pt-3 flex-shrink-0"> 
-                        <a href="#" id="showAllAlertsLink" class="text-sm text-blue-600 hover:underline">Ver todos os alertas</a>
-                    </div>
-                </div>
-
-                <div id="currentWeatherCard" class="current-weather-card p-4 md:p-6 space-y-3"> 
-                    <div class="flex justify-between items-center border-b pb-2 mb-3">
-                        <h2 class="text-lg font-semibold text-gray-700">Condições Atuais</h2>
-                        <select id="currentWeatherCitySelect" class="select-style-custom text-sm py-1 px-2 w-auto max-w-[180px]">
+            <div id="currentWeatherCard" class="card-style p-4 md:p-6 space-y-3 flex flex-col max-h-[450px]"> 
+                <div class="flex justify-between items-center border-b pb-2 mb-3 flex-shrink-0">
+                    <h2 class="text-lg font-semibold text-gray-700">Condições Atuais</h2>
+                    <select id="currentWeatherCitySelect" class="select-style-custom text-sm py-1 px-2 w-auto max-w-[180px]">
                         </select>
+                </div>
+                <div class="text-center mb-1 flex-shrink-0">
+                     Em <span id="currentWeatherCityName" class="font-semibold text-blue-600">--</span>
+                </div>
+                <div id="currentWeatherData" class="space-y-2 text-sm flex-grow overflow-y-auto pr-1"> 
+                    <div class="flex items-center justify-center mb-2">
+                        <img id="weatherIcon" src="https://openweathermap.org/img/wn/01d@2x.png" alt="Ícone do tempo" class="w-16 h-16 -mt-2 -mb-2">
+                        <p class="text-3xl font-bold ml-2"><span id="temperature">--</span>°C</p>
                     </div>
-                    <div class="text-center mb-1">
-                         Em <span id="currentWeatherCityName" class="font-semibold text-blue-600">--</span>
-                    </div>
-                    <div id="currentWeatherData" class="space-y-2 text-sm">
-                        <div class="flex items-center justify-center mb-2">
-                            <img id="weatherIcon" src="https://openweathermap.org/img/wn/01d@2x.png" alt="Ícone do tempo" class="w-16 h-16 -mt-2 -mb-2">
-                            <p class="text-3xl font-bold ml-2"><span id="temperature">--</span>°C</p>
-                        </div>
-                        <p class="text-center capitalize -mt-2 mb-2 text-gray-600"><strong id="weatherDescription">--</strong></p>
-                        <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs md:text-sm">
-                            <p>Sensação: <strong id="feelsLike">--</strong>°C</p>
-                            <p>Humidade: <strong id="humidity">--</strong>%</p>
-                            <p>Pressão: <strong id="pressure">--</strong> hPa</p>
-                            <p>Vento: <strong id="windSpeed">--</strong> m/s</p>
-                            <p>Nascer do Sol: <strong id="sunriseTime">--:--</strong></p>
-                            <p>Pôr do Sol: <strong id="sunsetTime">--:--</strong></p>
-                            <p>Chuva (1h): <strong id="rainLastHour">--</strong> mm</p>
-                            <p>Atualizado: <strong id="lastUpdatedTime">--:--</strong></p>
-                        </div>
-                    </div>
-                    <div id="currentWeatherError" class="text-center text-red-500 text-sm hidden">
-                        Não foi possível carregar os dados meteorológicos.
-                    </div>
-                    <div class="text-xs text-gray-500 text-center mt-2">
-                        Dados fornecidos por OpenWeather
+                    <p class="text-center capitalize -mt-2 mb-2 text-gray-600"><strong id="weatherDescription">--</strong></p>
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-xs md:text-sm">
+                        <p>Sensação: <strong id="feelsLike">--</strong>°C</p>
+                        <p>Humidade: <strong id="humidity">--</strong>%</p>
+                        <p>Pressão: <strong id="pressure">--</strong> hPa</p>
+                        <p>Vento: <strong id="windSpeed">--</strong> m/s</p>
+                        <p>Nascer do Sol: <strong id="sunriseTime">--:--</strong></p>
+                        <p>Pôr do Sol: <strong id="sunsetTime">--:--</strong></p>
+                        <p>Chuva (1h): <strong id="rainLastHour">--</strong> mm</p>
+                        <p>Atualizado: <strong id="lastUpdatedTime">--:--</strong></p>
                     </div>
                 </div>
+                <div id="currentWeatherError" class="text-center text-red-500 text-sm hidden mt-auto pt-2 flex-shrink-0">
+                    Não foi possível carregar os dados meteorológicos.
+                </div>
+                <div class="text-xs text-gray-500 text-center mt-auto pt-2 flex-shrink-0"> 
+                    Dados fornecidos por OpenWeather
+                </div>
             </div>
-        </section>
+
+            <div class="card-style p-4 md:p-6 flex flex-col max-h-[450px]"> 
+                <h3 class="text-lg font-semibold text-gray-700 border-b pb-2 mb-3 text-center flex-shrink-0">Previsão para os Próximos Dias</h3>
+                <div id="forecastDays" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-2 gap-2 text-center text-xs flex-grow overflow-y-auto pr-1">
+                    </div>
+                <div id="forecastError" class="text-center text-red-500 text-sm hidden mt-auto pt-2 flex-shrink-0">
+                    Não foi possível carregar a previsão do tempo.
+                </div>
+            </div>
+
+        </div>
     </main>
 
     <footer class="text-center p-4 text-sm text-gray-600 border-t mt-8 bg-white">
