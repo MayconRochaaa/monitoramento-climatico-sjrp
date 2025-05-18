@@ -18,7 +18,7 @@ const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
 // Helper para formatar data como YYYY-MM-DD
 const formatDateToYYYYMMDD = (date) => {
     const d = new Date(date);
-    // Ajuste para garantir que estamos a usar UTC para consistência com datas de API e BD
+    // Usar UTC para consistência, pois as datas da API e do banco de dados podem não ter fuso horário explícito
     const year = d.getUTCFullYear();
     const month = String(d.getUTCMonth() + 1).padStart(2, '0'); // Meses são 0-indexados
     const day = String(d.getUTCDate()).padStart(2, '0');
@@ -28,17 +28,28 @@ const formatDateToYYYYMMDD = (date) => {
 // --- Lógica de Geração de Alertas ---
 
 const ALERT_RULES = {
-    //TEMP_THRESHOLD_MAX: 38, // °C - Ajustado para ser um pouco mais provável para previsão
-    TEMP_THRESHOLD_MAX: 10, // °C - Ajustado para ser um pouco mais provável para previsão
-    RAIN_THRESHOLD: 25, // mm/h - REINTRODUZIDO para dados atuais
-    POP_THRESHOLD: 0.6, // Probabilidade de precipitação (60%) para considerar risco de chuva na PREVISÃO
-    //WIND_THRESHOLD_MS: 11.11, // m/s
-    WIND_THRESHOLD_MS: 1, // m/s
+    //TEMP_THRESHOLD_MAX_CURRENT: 40, // °C para tempo atual (pode ser mais alto)
+    TEMP_THRESHOLD_MAX_CURRENT: 10, // °C para tempo atual (pode ser mais alto)
+    //TEMP_THRESHOLD_MAX_FORECAST: 38, // °C para previsão (um pouco mais sensível)
+    TEMP_THRESHOLD_MAX_FORECAST: 10, // °C para previsão (um pouco mais sensível)
+    //RAIN_THRESHOLD_CURRENT: 20, // mm/h para tempo atual (ajuste conforme necessário)
+    RAIN_THRESHOLD_CURRENT: 0.5, // mm/h para tempo atual (ajuste conforme necessário)
+    //POP_THRESHOLD_FORECAST: 0.6, // Probabilidade de precipitação (60%) para previsão
+    POP_THRESHOLD_FORECAST: 0.1, // Probabilidade de precipitação (60%) para previsão
+    //WIND_THRESHOLD_MS: 11.11, // m/s (~40 km/h) para atual e previsão
+    WIND_THRESHOLD_MS: 1, // m/s (~40 km/h) para atual e previsão
 };
 
 // Função auxiliar para processar a inserção de um alerta e verificar duplicados
 async function processAlertInsertion(alertToInsert, updateCountCallback) {
     try {
+        // Verifica se alert_type_id existe na tabela alert_types
+        const typeExists = await db.query('SELECT id FROM alert_types WHERE id = $1', [alertToInsert.alert_type_id]);
+        if (typeExists.rows.length === 0) {
+            console.warn(`[Alert Generation] Tipo de alerta ID '${alertToInsert.alert_type_id}' não encontrado na tabela 'alert_types'. Alerta para ${alertToInsert.city_name} não será inserido.`);
+            return;
+        }
+
         const checkDuplicateQuery = 'SELECT id FROM alerts WHERE city_id = $1 AND alert_type_id = $2 AND alert_date = $3';
         const duplicateResult = await db.query(checkDuplicateQuery, [alertToInsert.city_id, alertToInsert.alert_type_id, alertToInsert.alert_date]);
 
@@ -57,7 +68,7 @@ async function processAlertInsertion(alertToInsert, updateCountCallback) {
             // console.log(`[Alert Generation] Alerta duplicado para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}) na data ${alertToInsert.alert_date}. Não será inserido.`);
         }
     } catch (dbError) {
-        console.error(`[Alert Generation] Erro DB ao inserir alerta para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}):`, dbError);
+        console.error(`[Alert Generation] Erro DB ao inserir alerta para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}):`, dbError.message);
     }
 }
 
@@ -93,12 +104,11 @@ async function checkWeatherAndGenerateAlerts() {
                 const rain1h = weatherData.rain ? weatherData.rain['1h'] : 0; 
                 const windSpeed = weatherData.wind.speed;
 
-                if (temperature > ALERT_RULES.TEMP_THRESHOLD_MAX) { 
+                if (temperature > ALERT_RULES.TEMP_THRESHOLD_MAX_CURRENT) { 
                     await processAlertInsertion({ city_id: city.id, city_name: city.name, alert_type_id: 'onda_calor', alert_date: todayYYYYMMDD, description: `Temperatura atual elevada de ${temperature.toFixed(1)}°C.`, severity: 'alta' }, (count) => alertsGeneratedCount += count);
                 }
                 
-                // Regra de chuva para HOJE usando rain1h e RAIN_THRESHOLD
-                if (rain1h > ALERT_RULES.RAIN_THRESHOLD) { 
+                if (rain1h > ALERT_RULES.RAIN_THRESHOLD_CURRENT) { 
                     await processAlertInsertion({ city_id: city.id, city_name: city.name, alert_type_id: 'chuvas_fortes', alert_date: todayYYYYMMDD, description: `Chuva intensa atual de ${rain1h}mm/h.`, severity: 'alta' }, (count) => alertsGeneratedCount += count);
                 }
 
@@ -119,38 +129,39 @@ async function checkWeatherAndGenerateAlerts() {
 
                 const dailyForecasts = {};
                 forecastData.list.forEach(item => {
-                    const date = item.dt_txt.split(' ')[0]; 
+                    const date = item.dt_txt.split(' ')[0]; // YYYY-MM-DD
                     if (!dailyForecasts[date]) {
-                        dailyForecasts[date] = { date: date, temps: [], pops: [], weatherDescriptions: [], windSpeeds: [] };
+                        dailyForecasts[date] = { date: date, temps_max: [], pops: [], weatherDescriptions: [], windSpeeds: [] };
                     }
-                    dailyForecasts[date].temps.push(item.main.temp_max); 
+                    dailyForecasts[date].temps_max.push(item.main.temp_max); 
                     dailyForecasts[date].pops.push(item.pop || 0); 
                     dailyForecasts[date].weatherDescriptions.push(item.weather[0].description.toLowerCase());
                     dailyForecasts[date].windSpeeds.push(item.wind.speed);
                 });
 
                 for (const dateKey in dailyForecasts) {
+                    // Não gerar alertas futuros para "hoje", pois já foram tratados pela secção de tempo atual
                     if (dateKey === todayYYYYMMDD) continue; 
 
                     const dayData = dailyForecasts[dateKey];
-                    const forecastDate = dayData.date; 
-                    const maxTemp = Math.max(...dayData.temps);
+                    const forecastDate = dayData.date; // YYYY-MM-DD
+                    const maxTemp = Math.max(...dayData.temps_max);
                     const maxPop = Math.max(...dayData.pops);
                     const maxWindSpeed = Math.max(...dayData.windSpeeds);
                     
-                    if (maxTemp > ALERT_RULES.TEMP_THRESHOLD_MAX) {
+                    if (maxTemp > ALERT_RULES.TEMP_THRESHOLD_MAX_FORECAST) {
                         await processAlertInsertion({
                             city_id: city.id, city_name: city.name, alert_type_id: 'onda_calor', alert_date: forecastDate,
-                            description: `Previsão de temperatura máxima de ${maxTemp.toFixed(1)}°C. Risco de onda de calor.`,
+                            description: `Previsão de temperatura máxima de ${maxTemp.toFixed(1)}°C.`,
                             severity: 'media' 
                         }, (count) => alertsGeneratedCount += count);
                     }
 
-                    const hasRainDescription = dayData.weatherDescriptions.some(desc => desc.includes('chuva') || desc.includes('tempestade'));
-                    if (maxPop > ALERT_RULES.POP_THRESHOLD && hasRainDescription) {
+                    const hasRainDescription = dayData.weatherDescriptions.some(desc => desc.includes('chuva') || desc.includes('tempestade') || desc.includes('temporal'));
+                    if (maxPop > ALERT_RULES.POP_THRESHOLD_FORECAST && hasRainDescription) {
                         await processAlertInsertion({
                             city_id: city.id, city_name: city.name, alert_type_id: 'chuvas_fortes', alert_date: forecastDate,
-                            description: `Previsão de ${ (maxPop * 100).toFixed(0)}% de chance de chuva. Risco de chuvas fortes.`,
+                            description: `Previsão de ${ (maxPop * 100).toFixed(0)}% de chance de chuva.`,
                             severity: 'media'
                         }, (count) => alertsGeneratedCount += count);
                     }
@@ -174,7 +185,6 @@ async function checkWeatherAndGenerateAlerts() {
         console.error(`[${new Date().toISOString()}] [Alert Generation] Erro geral na função checkWeatherAndGenerateAlerts:`, error);
     }
 }
-
 
 // --- Endpoints da API (sem alterações) ---
 app.get('/api/cidades', async (req, res) => {
@@ -234,29 +244,30 @@ app.get('/api/weather/forecast/:cityId', async (req, res) => {
                 dailyForecasts[date] = {
                     date: date, 
                     displayDate: new Date(date + "T00:00:00Z").toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }),
-                    temps: [], pops: [], weatherDescriptions: [], windSpeeds: []
+                    temps_max: [], temps_min: [], pops: [], weatherDescriptions: [], windSpeeds: [], icons: []
                 };
             }
-            dailyForecasts[date].temps.push(item.main.temp_max);
+            dailyForecasts[date].temps_max.push(item.main.temp_max);
+            dailyForecasts[date].temps_min.push(item.main.temp_min);
             dailyForecasts[date].pops.push(item.pop || 0);
             dailyForecasts[date].weatherDescriptions.push(item.weather[0].description.toLowerCase());
             dailyForecasts[date].windSpeeds.push(item.wind.speed);
+            dailyForecasts[date].icons.push(item.weather[0].icon);
         });
         const processedForecast = Object.values(dailyForecasts).map(day => {
-            const middayEntry = day.weatherDescriptions.includes('chuva') ? 
-                                day.weatherDescriptions.findIndex(d => d.includes('chuva')) : 
-                                Math.floor(day.weatherDescriptions.length / 2);
-            const representativeDescription = day.weatherDescriptions[middayEntry] || day.weatherDescriptions[0];
-            let representativeIcon = '01d'; 
-            const entryForIcon = forecastData.list.find(item => item.dt_txt.startsWith(day.date) && item.weather[0].description.toLowerCase() === representativeDescription);
-            if (entryForIcon) {
-                representativeIcon = entryForIcon.weather[0].icon;
+            // Lógica para escolher descrição e ícone representativos
+            let representativeIndex = Math.floor(day.weatherDescriptions.length / 2); // Pega o do meio do dia
+            // Se houver previsão de chuva, tenta usar a descrição e ícone de chuva
+            const rainIndex = day.weatherDescriptions.findIndex(d => d.includes('chuva') || d.includes('tempestade'));
+            if (rainIndex !== -1) {
+                representativeIndex = rainIndex;
             }
+            
             return {
                 date: day.date, displayDate: day.displayDate,
-                minTemp: Math.min(...day.temps), maxTemp: Math.max(...day.temps),
-                description: representativeDescription,
-                icon: representativeIcon,
+                minTemp: Math.min(...day.temps_min), maxTemp: Math.max(...day.temps_max),
+                description: day.weatherDescriptions[representativeIndex] || day.weatherDescriptions[0],
+                icon: day.icons[representativeIndex] || day.icons[0],
             };
         }).slice(0, 5); 
         res.json({ cityId, cityName, forecast: processedForecast });
