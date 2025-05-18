@@ -11,6 +11,8 @@ const db = require('./config/db');
 const app = express();
 const port = 3000;
 
+// Middleware para parsear JSON no corpo das requisições POST
+app.use(express.json());
 app.use(cors());
 
 const OPENWEATHER_API_KEY = process.env.OPENWEATHER_API_KEY;
@@ -28,19 +30,14 @@ const formatDateToYYYYMMDD = (date) => {
 // --- Lógica de Geração de Alertas ---
 
 const ALERT_RULES = {
-    //TEMP_THRESHOLD_MAX_CURRENT: 40, // °C para tempo atual (pode ser mais alto)
-    TEMP_THRESHOLD_MAX_CURRENT: 10, // °C para tempo atual (pode ser mais alto)
-    //TEMP_THRESHOLD_MAX_FORECAST: 38, // °C para previsão (um pouco mais sensível)
-    TEMP_THRESHOLD_MAX_FORECAST: 10, // °C para previsão (um pouco mais sensível)
-    //RAIN_THRESHOLD_CURRENT: 20, // mm/h para tempo atual (ajuste conforme necessário)
-    RAIN_THRESHOLD_CURRENT: 0.5, // mm/h para tempo atual (ajuste conforme necessário)
-    //POP_THRESHOLD_FORECAST: 0.6, // Probabilidade de precipitação (60%) para previsão
-    POP_THRESHOLD_FORECAST: 0.1, // Probabilidade de precipitação (60%) para previsão
-    //WIND_THRESHOLD_MS: 11.11, // m/s (~40 km/h) para atual e previsão
-    WIND_THRESHOLD_MS: 1, // m/s (~40 km/h) para atual e previsão
+    TEMP_THRESHOLD_MAX_CURRENT: 40, // °C para tempo atual
+    TEMP_THRESHOLD_MAX_FORECAST: 38, // °C para previsão
+    RAIN_THRESHOLD_CURRENT: 20, // mm/h para tempo atual 
+    POP_THRESHOLD_FORECAST: 0.6, // Probabilidade de precipitação (60%) para previsão
+    WIND_THRESHOLD_MS: 11.11, // m/s (~40 km/h) para atual e previsão
 };
 
-// Função auxiliar para processar a inserção de um alerta e verificar duplicados
+// Função auxiliar para processar a inserção de um alerta, verificar duplicados e identificar subscritores
 async function processAlertInsertion(alertToInsert, updateCountCallback) {
     try {
         // Verifica se alert_type_id existe na tabela alert_types
@@ -62,13 +59,31 @@ async function processAlertInsertion(alertToInsert, updateCountCallback) {
                 alertToInsert.description,
                 alertToInsert.severity
             ]);
-            console.log(`[Alert Generation] Alerta GERADO para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}, Data: ${alertToInsert.alert_date}), ID: ${insertedAlert.rows[0].id}`);
+            const newAlertId = insertedAlert.rows[0].id;
+            console.log(`[Alert Generation] Alerta GERADO para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}, Data: ${alertToInsert.alert_date}), ID: ${newAlertId}`);
             if (updateCountCallback) updateCountCallback(1);
+
+            // Identificar subscritores para este alerta
+            const subscribersQuery = `
+                SELECT u.email 
+                FROM users u
+                JOIN user_city_subscriptions ucs ON u.id = ucs.user_id
+                WHERE ucs.city_id = $1;
+            `;
+            const subscribersResult = await db.query(subscribersQuery, [alertToInsert.city_id]);
+            if (subscribersResult.rows.length > 0) {
+                const emails = subscribersResult.rows.map(row => row.email);
+                console.log(`[Notification Prep] Alerta ID ${newAlertId} para ${alertToInsert.city_name} (Data: ${alertToInsert.alert_date}, Tipo: ${alertToInsert.alert_type_id}) deve ser enviado para: ${emails.join(', ')}`);
+                // No futuro, aqui seria chamada a função de envio de e-mail.
+            } else {
+                // console.log(`[Notification Prep] Nenhum subscritor encontrado para alertas em ${alertToInsert.city_name} para o alerta tipo ${alertToInsert.alert_type_id} na data ${alertToInsert.alert_date}.`);
+            }
+
         } else {
             // console.log(`[Alert Generation] Alerta duplicado para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}) na data ${alertToInsert.alert_date}. Não será inserido.`);
         }
     } catch (dbError) {
-        console.error(`[Alert Generation] Erro DB ao inserir alerta para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}):`, dbError.message);
+        console.error(`[Alert Generation] Erro DB ao inserir/processar alerta para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}):`, dbError.message);
     }
 }
 
@@ -76,30 +91,20 @@ async function processAlertInsertion(alertToInsert, updateCountCallback) {
 async function checkWeatherAndGenerateAlerts() {
     console.log(`[${new Date().toISOString()}] [Alert Generation] Iniciando verificação de tempo (atual e previsão)...`);
     let alertsGeneratedCount = 0;
-
     try {
         const citiesResult = await db.query('SELECT id, name, latitude, longitude FROM cities');
         const cities = citiesResult.rows;
-
-        if (cities.length === 0) {
-            console.log('[Alert Generation] Nenhuma cidade encontrada no banco de dados para verificar.');
-            return;
-        }
-
+        if (cities.length === 0) { console.log('[Alert Generation] Nenhuma cidade encontrada.'); return; }
         const todayYYYYMMDD = formatDateToYYYYMMDD(new Date());
 
         for (const city of cities) {
-            if (!city.latitude || !city.longitude) {
-                console.warn(`[Alert Generation] Coordenadas ausentes para ${city.name}. A ignorar.`);
-                continue;
-            }
-
+            if (!city.latitude || !city.longitude) { console.warn(`[Alert Generation] Coordenadas ausentes para ${city.name}.`); continue; }
+            
             // 1. Verificar Tempo Atual e Gerar Alertas para HOJE
             try {
                 const weatherApiUrl = `https://api.openweathermap.org/data/2.5/weather?lat=${city.latitude}&lon=${city.longitude}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=pt_br`;
                 const weatherResponse = await axios.get(weatherApiUrl);
                 const weatherData = weatherResponse.data;
-
                 const temperature = weatherData.main.temp;
                 const rain1h = weatherData.rain ? weatherData.rain['1h'] : 0; 
                 const windSpeed = weatherData.wind.speed;
@@ -107,86 +112,55 @@ async function checkWeatherAndGenerateAlerts() {
                 if (temperature > ALERT_RULES.TEMP_THRESHOLD_MAX_CURRENT) { 
                     await processAlertInsertion({ city_id: city.id, city_name: city.name, alert_type_id: 'onda_calor', alert_date: todayYYYYMMDD, description: `Temperatura atual elevada de ${temperature.toFixed(1)}°C.`, severity: 'alta' }, (count) => alertsGeneratedCount += count);
                 }
-                
                 if (rain1h > ALERT_RULES.RAIN_THRESHOLD_CURRENT) { 
                     await processAlertInsertion({ city_id: city.id, city_name: city.name, alert_type_id: 'chuvas_fortes', alert_date: todayYYYYMMDD, description: `Chuva intensa atual de ${rain1h}mm/h.`, severity: 'alta' }, (count) => alertsGeneratedCount += count);
                 }
-
                 if (windSpeed > ALERT_RULES.WIND_THRESHOLD_MS) {
                     const windSpeedKmh = (windSpeed * 3.6).toFixed(1);
                     await processAlertInsertion({ city_id: city.id, city_name: city.name, alert_type_id: 'ventos_fortes', alert_date: todayYYYYMMDD, description: `Ventos fortes atuais de ${windSpeedKmh} km/h.`, severity: 'media' }, (count) => alertsGeneratedCount += count);
                 }
-
-            } catch (currentWeatherError) {
-                console.error(`[Alert Generation] Erro ao buscar tempo ATUAL para ${city.name}:`, currentWeatherError.message);
-            }
+            } catch (currentWeatherError) { console.error(`[Alert Generation] Erro tempo ATUAL para ${city.name}:`, currentWeatherError.message); }
 
             // 2. Verificar Previsão e Gerar Alertas FUTUROS
             try {
                 const forecastApiUrl = `https://api.openweathermap.org/data/2.5/forecast?lat=${city.latitude}&lon=${city.longitude}&appid=${OPENWEATHER_API_KEY}&units=metric&lang=pt_br`;
                 const forecastResponse = await axios.get(forecastApiUrl);
                 const forecastData = forecastResponse.data;
-
                 const dailyForecasts = {};
                 forecastData.list.forEach(item => {
-                    const date = item.dt_txt.split(' ')[0]; // YYYY-MM-DD
-                    if (!dailyForecasts[date]) {
-                        dailyForecasts[date] = { date: date, temps_max: [], pops: [], weatherDescriptions: [], windSpeeds: [] };
-                    }
+                    const date = item.dt_txt.split(' ')[0]; 
+                    if (!dailyForecasts[date]) { dailyForecasts[date] = { date: date, temps_max: [], pops: [], weatherDescriptions: [], windSpeeds: [] }; }
                     dailyForecasts[date].temps_max.push(item.main.temp_max); 
                     dailyForecasts[date].pops.push(item.pop || 0); 
                     dailyForecasts[date].weatherDescriptions.push(item.weather[0].description.toLowerCase());
                     dailyForecasts[date].windSpeeds.push(item.wind.speed);
                 });
-
                 for (const dateKey in dailyForecasts) {
-                    // Não gerar alertas futuros para "hoje", pois já foram tratados pela secção de tempo atual
                     if (dateKey === todayYYYYMMDD) continue; 
-
                     const dayData = dailyForecasts[dateKey];
-                    const forecastDate = dayData.date; // YYYY-MM-DD
+                    const forecastDate = dayData.date; 
                     const maxTemp = Math.max(...dayData.temps_max);
                     const maxPop = Math.max(...dayData.pops);
                     const maxWindSpeed = Math.max(...dayData.windSpeeds);
-                    
                     if (maxTemp > ALERT_RULES.TEMP_THRESHOLD_MAX_FORECAST) {
-                        await processAlertInsertion({
-                            city_id: city.id, city_name: city.name, alert_type_id: 'onda_calor', alert_date: forecastDate,
-                            description: `Previsão de temperatura máxima de ${maxTemp.toFixed(1)}°C.`,
-                            severity: 'media' 
-                        }, (count) => alertsGeneratedCount += count);
+                        await processAlertInsertion({ city_id: city.id, city_name: city.name, alert_type_id: 'onda_calor', alert_date: forecastDate, description: `Previsão de temperatura máxima de ${maxTemp.toFixed(1)}°C.`, severity: 'media' }, (count) => alertsGeneratedCount += count);
                     }
-
                     const hasRainDescription = dayData.weatherDescriptions.some(desc => desc.includes('chuva') || desc.includes('tempestade') || desc.includes('temporal'));
                     if (maxPop > ALERT_RULES.POP_THRESHOLD_FORECAST && hasRainDescription) {
-                        await processAlertInsertion({
-                            city_id: city.id, city_name: city.name, alert_type_id: 'chuvas_fortes', alert_date: forecastDate,
-                            description: `Previsão de ${ (maxPop * 100).toFixed(0)}% de chance de chuva.`,
-                            severity: 'media'
-                        }, (count) => alertsGeneratedCount += count);
+                        await processAlertInsertion({ city_id: city.id, city_name: city.name, alert_type_id: 'chuvas_fortes', alert_date: forecastDate, description: `Previsão de ${ (maxPop * 100).toFixed(0)}% de chance de chuva.`, severity: 'media' }, (count) => alertsGeneratedCount += count);
                     }
-                    
                     if (maxWindSpeed > ALERT_RULES.WIND_THRESHOLD_MS) {
                         const windSpeedKmh = (maxWindSpeed * 3.6).toFixed(1);
-                        await processAlertInsertion({
-                            city_id: city.id, city_name: city.name, alert_type_id: 'ventos_fortes', alert_date: forecastDate,
-                            description: `Previsão de ventos fortes de até ${windSpeedKmh} km/h.`,
-                            severity: 'media'
-                        }, (count) => alertsGeneratedCount += count);
+                        await processAlertInsertion({ city_id: city.id, city_name: city.name, alert_type_id: 'ventos_fortes', alert_date: forecastDate, description: `Previsão de ventos fortes de até ${windSpeedKmh} km/h.`, severity: 'media' }, (count) => alertsGeneratedCount += count);
                     }
                 }
-            } catch (forecastError) {
-                console.error(`[Alert Generation] Erro ao buscar PREVISÃO para ${city.name}:`, forecastError.message);
-            }
+            } catch (forecastError) { console.error(`[Alert Generation] Erro PREVISÃO para ${city.name}:`, forecastError.message); }
         }
         console.log(`[${new Date().toISOString()}] [Alert Generation] Verificação concluída. ${alertsGeneratedCount} novos alertas foram gerados (atuais e futuros).`);
-
-    } catch (error) {
-        console.error(`[${new Date().toISOString()}] [Alert Generation] Erro geral na função checkWeatherAndGenerateAlerts:`, error);
-    }
+    } catch (error) { console.error(`[${new Date().toISOString()}] [Alert Generation] Erro geral:`, error); }
 }
 
-// --- Endpoints da API (sem alterações) ---
+// --- Endpoints da API ---
 app.get('/api/cidades', async (req, res) => {
     try {
         const result = await db.query('SELECT id, name, latitude, longitude FROM cities ORDER BY name');
@@ -255,14 +229,9 @@ app.get('/api/weather/forecast/:cityId', async (req, res) => {
             dailyForecasts[date].icons.push(item.weather[0].icon);
         });
         const processedForecast = Object.values(dailyForecasts).map(day => {
-            // Lógica para escolher descrição e ícone representativos
-            let representativeIndex = Math.floor(day.weatherDescriptions.length / 2); // Pega o do meio do dia
-            // Se houver previsão de chuva, tenta usar a descrição e ícone de chuva
+            let representativeIndex = Math.floor(day.weatherDescriptions.length / 2); 
             const rainIndex = day.weatherDescriptions.findIndex(d => d.includes('chuva') || d.includes('tempestade'));
-            if (rainIndex !== -1) {
-                representativeIndex = rainIndex;
-            }
-            
+            if (rainIndex !== -1) { representativeIndex = rainIndex; }
             return {
                 date: day.date, displayDate: day.displayDate,
                 minTemp: Math.min(...day.temps_min), maxTemp: Math.max(...day.temps_max),
@@ -314,6 +283,66 @@ app.get('/api/alertas', async (req, res) => {
     }
 });
 
+app.post('/api/subscribe', async (req, res) => {
+    const { email, cityIds } = req.body; 
+
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+        return res.status(400).json({ error: 'Formato de e-mail inválido.' });
+    }
+    if (!cityIds || !Array.isArray(cityIds) || cityIds.length === 0) {
+        return res.status(400).json({ error: 'Pelo menos uma cidade deve ser selecionada para subscrição.' });
+    }
+
+    console.log(`POST /api/subscribe - Tentativa de subscrição para email: ${email}, cidades: ${cityIds.join(',')}`);
+
+    const client = await db.pool.connect(); 
+    try {
+        await client.query('BEGIN'); 
+
+        let userResult = await client.query('SELECT id FROM users WHERE email = $1', [email]);
+        let userId;
+        if (userResult.rows.length > 0) {
+            userId = userResult.rows[0].id;
+            // console.log(`Utilizador encontrado com ID: ${userId} para email: ${email}`);
+        } else {
+            const insertUserResult = await client.query('INSERT INTO users (email) VALUES ($1) RETURNING id', [email]);
+            userId = insertUserResult.rows[0].id;
+            console.log(`Novo utilizador criado com ID: ${userId} para email: ${email}`);
+        }
+
+        let newSubscriptionsCount = 0;
+        for (const cityId of cityIds) {
+            const cityExists = await client.query('SELECT id FROM cities WHERE id = $1', [cityId]);
+            if (cityExists.rows.length === 0) {
+                console.warn(`Tentativa de subscrever cidade inexistente (ID: ${cityId}) para o utilizador ${email}. A ignorar esta cidade.`);
+                continue; 
+            }
+            try {
+                await client.query(
+                    'INSERT INTO user_city_subscriptions (user_id, city_id) VALUES ($1, $2)',
+                    [userId, cityId]
+                );
+                // console.log(`Utilizador ${userId} subscrito à cidade ${cityId}.`);
+                newSubscriptionsCount++;
+            } catch (error) {
+                if (error.code === '23505') { 
+                    // console.log(`Utilizador ${userId} já está subscrito à cidade ${cityId}.`);
+                } else {
+                    throw error; 
+                }
+            }
+        }
+        await client.query('COMMIT'); 
+        res.status(201).json({ message: `Subscrição processada para ${email}. Novas subscrições adicionadas: ${newSubscriptionsCount}.` });
+    } catch (error) {
+        await client.query('ROLLBACK'); 
+        console.error('Erro durante o processo de subscrição:', error);
+        res.status(500).json({ error: 'Erro ao processar a subscrição.' });
+    } finally {
+        client.release(); 
+    }
+});
+
 app.get('/api/trigger-alert-generation', async (req, res) => {
     console.log('GET /api/trigger-alert-generation - Disparando geração de alertas...');
     try {
@@ -325,7 +354,7 @@ app.get('/api/trigger-alert-generation', async (req, res) => {
     }
 });
 
-cron.schedule('*/1 * * * *', () => { 
+cron.schedule('0 * * * *', () => { 
    console.log(`[${new Date().toISOString()}] [Scheduler] Executando verificação agendada...`);
    checkWeatherAndGenerateAlerts();
 });
