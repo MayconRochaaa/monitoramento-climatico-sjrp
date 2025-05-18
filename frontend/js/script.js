@@ -1,7 +1,7 @@
 // frontend/js/script.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Elementos da DOM
+    // Elementos da DOM (sem alterações)
     const menuBtn = document.getElementById('menuBtn');
     const filtersSidebar = document.getElementById('filtersSidebar');
     const currentYearEl = document.getElementById('currentYear');
@@ -16,7 +16,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const showAllAlertsLink = document.getElementById('showAllAlertsLink');
     const mapPlaceholder = document.getElementById('mapPlaceholder'); 
 
-    // Elementos do Card de Condições Atuais
     const currentWeatherCard = document.getElementById('currentWeatherCard');
     const currentWeatherCitySelectEl = document.getElementById('currentWeatherCitySelect');
     const currentWeatherCityNameEl = document.getElementById('currentWeatherCityName');
@@ -34,20 +33,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentWeatherDataEl = document.getElementById('currentWeatherData');
     const currentWeatherErrorEl = document.getElementById('currentWeatherError');
 
-    // NOVOS Elementos para Previsão do Tempo
     const weatherForecastContainerEl = document.getElementById('weatherForecastContainer');
     const forecastDaysContainerEl = document.getElementById('forecastDays');
     const forecastErrorEl = document.getElementById('forecastError');
 
     let mapInstance = null; 
-    let alertMarkersLayerGroup = null;
+    let alertMarkersClusterGroup = null; 
     let datePicker = null; 
     let baseCityMarkers = {};
     
     const API_BASE_URL = 'http://localhost:3000/api';
     let allCitiesData = []; 
     let allAlertTypesData = []; 
-    
+    let currentDisplayedAlerts = []; 
+
     // --- Funções de Data (sem alterações) ---
     const formatDate = (dateObject) => { 
         if (!dateObject) return null;
@@ -77,7 +76,26 @@ document.addEventListener('DOMContentLoaded', () => {
         return `${year}-${month}-${day}`;
     };
 
-    // --- Funções do Mapa (sem alterações) ---
+    // --- Funções do Mapa ---
+    function createCityAlertsPopupContent(cityId, cityName) {
+        const alertsForCity = currentDisplayedAlerts.filter(alert => alert.cityId === cityId);
+        if (alertsForCity.length === 0) {
+            return `<b>${cityName}</b><br>Nenhum alerta ativo com os filtros atuais.`;
+        }
+        let content = `<div style="max-height: 150px; overflow-y: auto; padding-right: 5px;"><b class="text-base">${cityName}</b><hr class="my-1">`;
+        content += '<ul class="list-none p-0 m-0">';
+        alertsForCity.sort((a, b) => parseDisplayDate(a.date) - parseDisplayDate(b.date)); 
+        alertsForCity.forEach(alert => {
+            const alertTypeInfo = allAlertTypesData.find(type => type.id === alert.typeId) || {};
+            content += `<li class="mb-1.5 text-xs">
+                            <strong style="color: ${alertTypeInfo.colorClass === 'alert-card-red' ? '#ef4444' : (alertTypeInfo.colorClass === 'alert-card-yellow' ? '#f59e0b' : '#3b82f6')};">${alert.type}</strong> (${alert.date})<br>
+                            <span class="text-gray-600">${alert.description || 'Sem descrição detalhada.'}</span>
+                        </li>`;
+        });
+        content += '</ul></div>';
+        return content;
+    }
+
     function initMap(citiesToMark = []) { 
         if (mapPlaceholder && !mapInstance) { 
             if (mapPlaceholder.clientHeight === 0) { mapPlaceholder.style.height = '400px'; }
@@ -89,18 +107,57 @@ document.addEventListener('DOMContentLoaded', () => {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                 maxZoom: 18,
             }).addTo(mapInstance);
+            
             baseCityMarkers = {}; 
             citiesToMark.forEach(city => { 
                 if(city.coords) {
-                    const marker = L.marker(city.coords, { opacity: 0.7, title: city.name })
+                    const marker = L.marker(city.coords, { 
+                        opacity: 0.7, 
+                        title: city.name 
+                    })
                         .addTo(mapInstance)
-                        .bindPopup(city.name);
+                        .on('click', function(e) { 
+                            if (this.getPopup()) { this.unbindPopup(); }
+                            this.bindPopup(createCityAlertsPopupContent(city.id, city.name)).openPopup();
+                        });
                     baseCityMarkers[city.id] = marker; 
                 }
             });
+            
+            alertMarkersClusterGroup = L.markerClusterGroup({
+                spiderfyOnMaxZoom: false, // Não expande os marcadores no zoom máximo do cluster
+                zoomToBoundsOnClick: false, // Não dá zoom ao clicar, para podermos abrir o popup
+                disableClusteringAtZoom: 13 // Opcional: desativa o clustering a partir de um certo nível de zoom
+            });
+
+            alertMarkersClusterGroup.on('clusterclick', function (a) {
+                // a.layer é o cluster que foi clicado
+                const childMarkers = a.layer.getAllChildMarkers();
+                if (childMarkers.length > 0) {
+                    // Assume que todos os marcadores num cluster próximo são da mesma cidade
+                    // (especialmente se as coordenadas dos alertas forem as mesmas da cidade)
+                    const firstMarkerData = childMarkers[0].options.customData; // Pega os dados customizados
+                    if (firstMarkerData && firstMarkerData.cityId) {
+                        const popupContent = createCityAlertsPopupContent(firstMarkerData.cityId, firstMarkerData.cityName);
+                        L.popup()
+                            .setLatLng(a.layer.getLatLng()) // Posição do cluster
+                            .setContent(popupContent)
+                            .openOn(mapInstance);
+                    } else {
+                        // Fallback se não houver customData (improvável com a nova lógica)
+                        // Ou se quiser um comportamento diferente para clusters mistos (mais complexo)
+                        mapInstance.setView(a.layer.getLatLng(), mapInstance.getZoom() + 1); // Zoom simples
+                    }
+                }
+                 // Impede o comportamento padrão de zoom do cluster se quisermos apenas o popup
+                // a.originalEvent.preventDefault(); // Pode não ser necessário com zoomToBoundsOnClick: false
+            });
+
+            mapInstance.addLayer(alertMarkersClusterGroup);
             mapInstance.whenReady(() => { setTimeout(() => { mapInstance.invalidateSize(); }, 100); });
         }
     }
+    
     function updateBaseCityMarkersOpacity(selectedCityIds = []) {
         const defaultOpacity = 0.7; const lowOpacity = 0.2;
         allCitiesData.forEach(city => { 
@@ -111,10 +168,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
     function updateMapAlerts(alertsToDisplay) {
-        if (!mapInstance) return;
-        if (!alertMarkersLayerGroup) { alertMarkersLayerGroup = L.layerGroup().addTo(mapInstance); }
-        alertMarkersLayerGroup.clearLayers(); 
+        if (!mapInstance || !alertMarkersClusterGroup) return; 
+        alertMarkersClusterGroup.clearLayers(); 
+
         alertsToDisplay.forEach(alertData => {
             if (alertData.coords) {
                 const alertTypeInfo = allAlertTypesData.find(type => type.id === alertData.typeId) || { icon: 'fas fa-info-circle', colorClass: 'alert-card-blue' }; 
@@ -122,11 +180,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (alertTypeInfo.colorClass === 'alert-card-red') markerColor = '#ef4444';
                 else if (alertTypeInfo.colorClass === 'alert-card-yellow') markerColor = '#f59e0b';
                 else if (alertTypeInfo.colorClass === 'alert-card-blue') markerColor = '#3b82f6';
+                
                 const iconHtml = `<i class="${alertTypeInfo.icon || 'fas fa-map-marker-alt'}" style="color: ${markerColor}; font-size: 28px; -webkit-text-stroke: 1.5px white; text-stroke: 1.5px white; text-shadow: 0 0 3px rgba(0,0,0,0.5);"></i>`;
-                const customIcon = L.divIcon({ html: iconHtml, className: 'custom-leaflet-alert-div-icon', iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] });
-                const marker = L.marker(alertData.coords, { icon: customIcon, title: `${alertData.city} - ${alertData.type}` });
-                marker.bindPopup(`<b>${alertData.city}</b><br>${alertData.type}<br>${alertData.date}`);
-                alertMarkersLayerGroup.addLayer(marker);
+                const customIcon = L.divIcon({ 
+                    html: iconHtml, className: 'custom-leaflet-alert-div-icon', 
+                    iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] 
+                });
+
+                // Adiciona dados customizados ao marcador para uso no evento clusterclick
+                const marker = L.marker(alertData.coords, { 
+                    icon: customIcon, 
+                    title: `${alertData.city} - ${alertData.type}`,
+                    customData: { // NOVO: Armazena dados relevantes no marcador
+                        cityId: alertData.cityId,
+                        cityName: alertData.city
+                    }
+                }).on('click', function(e) { 
+                    // Para marcadores individuais (não clusterizados ou quando o cluster é desativado)
+                    if (this.getPopup()) { this.unbindPopup(); }
+                    this.bindPopup(createCityAlertsPopupContent(alertData.cityId, alertData.city)).openPopup();
+                    L.DomEvent.stopPropagation(e); // Impede que o clique no marcador propague para o cluster se estiver sob um
+                });
+                alertMarkersClusterGroup.addLayer(marker); 
             }
         });
     }
@@ -172,7 +247,8 @@ document.addEventListener('DOMContentLoaded', () => {
         card.innerHTML = `<div class="flex items-start"><i class="${alertTypeInfo.icon} text-xl mr-3 mt-1"></i><div><h3 class="font-semibold text-sm">${alertData.city}</h3><p class="text-xs">Data: ${alertData.date}</p><p class="text-xs font-medium">${alertData.type}</p>${alertData.description ? `<p class="text-xs mt-1">${alertData.description}</p>` : ''}</div></div>`;
         return card;
     }
-    function displayAlerts(alertsToDisplay) {
+    function displayAlerts(alertsToDisplay) { 
+        currentDisplayedAlerts = alertsToDisplay; 
         if (!alertsListContainer) return;
         alertsListContainer.innerHTML = ''; 
         if (alertsToDisplay.length === 0) {
@@ -203,8 +279,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (selectedAlertTypeIds.length > 0) queryParams.append('alertTypeIds', selectedAlertTypeIds.join(','));
         const queryString = queryParams.toString();
         const fetchedAlerts = await fetchData(`alertas${queryString ? '?' + queryString : ''}`);
-        updateBaseCityMarkersOpacity(selectedCityIds); 
         displayAlerts(fetchedAlerts); 
+        updateBaseCityMarkersOpacity(selectedCityIds); 
     }
     function resetAllFilters() {
         if (datePicker) { datePicker.clearSelection(); }
@@ -229,8 +305,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentWeatherDataEl.classList.add('hidden');
                 currentWeatherErrorEl.classList.remove('hidden');
                 currentWeatherErrorEl.textContent = 'Erro ao carregar dados meteorológicos.';
-            } else if (endpoint.startsWith('weather/forecast') && forecastErrorEl) { // NOVO: Erro para previsão
-                forecastDaysContainerEl.innerHTML = ''; // Limpa cards antigos
+            } else if (endpoint.startsWith('weather/forecast') && forecastErrorEl) { 
+                forecastDaysContainerEl.innerHTML = ''; 
                 forecastErrorEl.textContent = 'Erro ao carregar previsão do tempo.';
                 forecastErrorEl.classList.remove('hidden');
             }
@@ -238,7 +314,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // --- Funções para Condições Atuais e Previsão ---
+    // --- Funções para Condições Atuais e Previsão (sem alterações) ---
     function updateCurrentWeatherUI(weatherData, cityName) {
         if (!currentWeatherCard) return;
         if (!weatherData || Object.keys(weatherData).length === 0) {
@@ -264,62 +340,38 @@ document.addEventListener('DOMContentLoaded', () => {
         rainLastHourEl.textContent = weatherData.rain_1h || 0;
         lastUpdatedTimeEl.textContent = new Date(weatherData.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     }
-
-    // NOVO: Função para atualizar a UI da Previsão
     function updateForecastUI(forecastResult) {
         if (!forecastDaysContainerEl || !forecastErrorEl) return;
-
-        forecastDaysContainerEl.innerHTML = ''; // Limpa cards de previsão antigos
-        forecastErrorEl.classList.add('hidden'); // Esconde mensagem de erro por padrão
-
+        forecastDaysContainerEl.innerHTML = ''; 
+        forecastErrorEl.classList.add('hidden'); 
         if (!forecastResult || !forecastResult.forecast || forecastResult.forecast.length === 0) {
             forecastErrorEl.textContent = 'Previsão não disponível para esta cidade.';
             forecastErrorEl.classList.remove('hidden');
             return;
         }
-
         forecastResult.forecast.forEach(day => {
             const dayCard = document.createElement('div');
-            dayCard.className = 'forecast-day-card p-2 rounded-lg shadow flex flex-col items-center justify-between'; // Adicionado flex para alinhar
-            
-            dayCard.innerHTML = `
-                <p class="font-semibold text-gray-700 text-xs">${day.displayDate}</p>
-                <img src="https://openweathermap.org/img/wn/${day.icon}.png" alt="${day.description}" class="w-10 h-10 mx-auto my-0.5">
-                <div class="text-center">
-                    <p class="text-sm">Max: <span class="font-medium text-red-500">${Math.round(day.maxTemp)}</span>°C</p>
-                    <p class="text-sm">Min: <span class="font-medium text-blue-500">${Math.round(day.minTemp)}</span>°C</p>
-                </div>
-                <p class="capitalize text-gray-500 text-[10px] mt-1 leading-tight">${day.description}</p>
-            `;
+            dayCard.className = 'forecast-day-card p-2 rounded-lg shadow flex flex-col items-center justify-between'; 
+            dayCard.innerHTML = `<p class="font-semibold text-gray-700 text-xs">${day.displayDate}</p><img src="https://openweathermap.org/img/wn/${day.icon}.png" alt="${day.description}" class="w-10 h-10 mx-auto my-0.5"><div class="text-center"><p class="text-sm">Max: <span class="font-medium text-red-500">${Math.round(day.maxTemp)}</span>°C</p><p class="text-sm">Min: <span class="font-medium text-blue-500">${Math.round(day.minTemp)}</span>°C</p></div><p class="capitalize text-gray-500 text-[10px] mt-1 leading-tight">${day.description}</p>`;
             forecastDaysContainerEl.appendChild(dayCard);
         });
     }
-
-
-    async function fetchAndDisplayWeatherData(cityId, cityName) { // Renomeada e combinada
+    async function fetchAndDisplayWeatherData(cityId, cityName) { 
         if (!cityId) {
-            console.warn("[Weather] ID da cidade não fornecido para buscar o tempo.");
             updateCurrentWeatherUI({}, cityName || "Cidade Inválida");
-            updateForecastUI(null); // Limpa a previsão também
+            updateForecastUI(null); 
             return;
         }
-        console.log(`[Weather] Buscando tempo atual e previsão para ${cityId} (${cityName})`);
-        
-        // Mostra placeholders ou loading state (opcional)
-        updateCurrentWeatherUI({ cityId: cityName }, cityName); // Mostra nome da cidade enquanto carrega
+        updateCurrentWeatherUI({ cityId: cityName }, cityName); 
         if (forecastDaysContainerEl) forecastDaysContainerEl.innerHTML = '<p class="text-xs text-gray-500 col-span-full text-center">Carregando previsão...</p>';
         if (forecastErrorEl) forecastErrorEl.classList.add('hidden');
-
-
         const [currentWeather, forecastWeather] = await Promise.all([
             fetchData(`weather/current/${cityId}`),
             fetchData(`weather/forecast/${cityId}`)
         ]);
-
         updateCurrentWeatherUI(currentWeather, cityName);
         updateForecastUI(forecastWeather);
     }
-
     function populateWeatherCitySelect(cities) {
         if (!currentWeatherCitySelectEl || !cities || cities.length === 0) return;
         currentWeatherCitySelectEl.innerHTML = ''; 
@@ -382,17 +434,17 @@ document.addEventListener('DOMContentLoaded', () => {
         if (currentWeatherCitySelectEl.value) {
             const selectedCityForWeather = allCitiesData.find(c => c.id === currentWeatherCitySelectEl.value);
             if (selectedCityForWeather) {
-                 await fetchAndDisplayWeatherData(selectedCityForWeather.id, selectedCityForWeather.name); // Nome da função alterado
+                 await fetchAndDisplayWeatherData(selectedCityForWeather.id, selectedCityForWeather.name);
             }
         } else if (allCitiesData.length > 0) { 
             const defaultCityForWeather = allCitiesData.find(c => c.id === 'sjrp') || allCitiesData[0];
             if (defaultCityForWeather) {
                 currentWeatherCitySelectEl.value = defaultCityForWeather.id; 
-                await fetchAndDisplayWeatherData(defaultCityForWeather.id, defaultCityForWeather.name); // Nome da função alterado
+                await fetchAndDisplayWeatherData(defaultCityForWeather.id, defaultCityForWeather.name);
             }
         } else {
             updateCurrentWeatherUI({}, "Nenhuma cidade");
-            updateForecastUI(null); // Limpa previsão se não houver cidades
+            updateForecastUI(null); 
         }
 
         if (currentWeatherCitySelectEl) {
@@ -400,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const selectedCityId = event.target.value;
                 const selectedCity = allCitiesData.find(c => c.id === selectedCityId);
                 if (selectedCity) {
-                    fetchAndDisplayWeatherData(selectedCity.id, selectedCity.name); // Nome da função alterado
+                    fetchAndDisplayWeatherData(selectedCity.id, selectedCity.name); 
                 }
             });
         }
