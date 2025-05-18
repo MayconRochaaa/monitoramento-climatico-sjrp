@@ -18,7 +18,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Elementos do Card de Condições Atuais
     const currentWeatherCard = document.getElementById('currentWeatherCard');
-    const currentWeatherCitySelectEl = document.getElementById('currentWeatherCitySelect'); // NOVO: Dropdown de seleção de cidade
+    const currentWeatherCitySelectEl = document.getElementById('currentWeatherCitySelect');
     const currentWeatherCityNameEl = document.getElementById('currentWeatherCityName');
     const weatherIconEl = document.getElementById('weatherIcon');
     const temperatureEl = document.getElementById('temperature');
@@ -33,6 +33,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const lastUpdatedTimeEl = document.getElementById('lastUpdatedTime');
     const currentWeatherDataEl = document.getElementById('currentWeatherData');
     const currentWeatherErrorEl = document.getElementById('currentWeatherError');
+
+    // NOVOS Elementos para Previsão do Tempo
+    const weatherForecastContainerEl = document.getElementById('weatherForecastContainer');
+    const forecastDaysContainerEl = document.getElementById('forecastDays');
+    const forecastErrorEl = document.getElementById('forecastError');
 
     let mapInstance = null; 
     let alertMarkersLayerGroup = null;
@@ -129,7 +134,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Funções para Filtros Acordeão e Checkboxes (sem alterações) ---
     function setupAccordion(headerElement, containerElement) {
         if (!headerElement || !containerElement) return;
-        const icon = headerElement.querySelector('i.fas.accordion-icon'); // Seleciona o ícone específico
+        const icon = headerElement.querySelector('i.fas.accordion-icon');
         headerElement.addEventListener('click', () => {
             const isHidden = containerElement.classList.contains('hidden');
             containerElement.classList.toggle('hidden', !isHidden);
@@ -224,12 +229,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 currentWeatherDataEl.classList.add('hidden');
                 currentWeatherErrorEl.classList.remove('hidden');
                 currentWeatherErrorEl.textContent = 'Erro ao carregar dados meteorológicos.';
+            } else if (endpoint.startsWith('weather/forecast') && forecastErrorEl) { // NOVO: Erro para previsão
+                forecastDaysContainerEl.innerHTML = ''; // Limpa cards antigos
+                forecastErrorEl.textContent = 'Erro ao carregar previsão do tempo.';
+                forecastErrorEl.classList.remove('hidden');
             }
             return []; 
         }
     }
 
-    // --- Funções para Condições Atuais ---
+    // --- Funções para Condições Atuais e Previsão ---
     function updateCurrentWeatherUI(weatherData, cityName) {
         if (!currentWeatherCard) return;
         if (!weatherData || Object.keys(weatherData).length === 0) {
@@ -256,31 +265,70 @@ document.addEventListener('DOMContentLoaded', () => {
         lastUpdatedTimeEl.textContent = new Date(weatherData.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     }
 
-    async function fetchAndDisplayCurrentWeather(cityId, cityName) {
+    // NOVO: Função para atualizar a UI da Previsão
+    function updateForecastUI(forecastResult) {
+        if (!forecastDaysContainerEl || !forecastErrorEl) return;
+
+        forecastDaysContainerEl.innerHTML = ''; // Limpa cards de previsão antigos
+        forecastErrorEl.classList.add('hidden'); // Esconde mensagem de erro por padrão
+
+        if (!forecastResult || !forecastResult.forecast || forecastResult.forecast.length === 0) {
+            forecastErrorEl.textContent = 'Previsão não disponível para esta cidade.';
+            forecastErrorEl.classList.remove('hidden');
+            return;
+        }
+
+        forecastResult.forecast.forEach(day => {
+            const dayCard = document.createElement('div');
+            dayCard.className = 'forecast-day-card p-2 rounded-lg shadow flex flex-col items-center justify-between'; // Adicionado flex para alinhar
+            
+            dayCard.innerHTML = `
+                <p class="font-semibold text-gray-700 text-xs">${day.displayDate}</p>
+                <img src="https://openweathermap.org/img/wn/${day.icon}.png" alt="${day.description}" class="w-10 h-10 mx-auto my-0.5">
+                <div class="text-center">
+                    <p class="text-sm">Max: <span class="font-medium text-red-500">${Math.round(day.maxTemp)}</span>°C</p>
+                    <p class="text-sm">Min: <span class="font-medium text-blue-500">${Math.round(day.minTemp)}</span>°C</p>
+                </div>
+                <p class="capitalize text-gray-500 text-[10px] mt-1 leading-tight">${day.description}</p>
+            `;
+            forecastDaysContainerEl.appendChild(dayCard);
+        });
+    }
+
+
+    async function fetchAndDisplayWeatherData(cityId, cityName) { // Renomeada e combinada
         if (!cityId) {
             console.warn("[Weather] ID da cidade não fornecido para buscar o tempo.");
             updateCurrentWeatherUI({}, cityName || "Cidade Inválida");
+            updateForecastUI(null); // Limpa a previsão também
             return;
         }
-        console.log(`[Weather] Buscando tempo para ${cityId} (${cityName})`);
-        const weatherData = await fetchData(`weather/current/${cityId}`);
-        updateCurrentWeatherUI(weatherData, cityName);
+        console.log(`[Weather] Buscando tempo atual e previsão para ${cityId} (${cityName})`);
+        
+        // Mostra placeholders ou loading state (opcional)
+        updateCurrentWeatherUI({ cityId: cityName }, cityName); // Mostra nome da cidade enquanto carrega
+        if (forecastDaysContainerEl) forecastDaysContainerEl.innerHTML = '<p class="text-xs text-gray-500 col-span-full text-center">Carregando previsão...</p>';
+        if (forecastErrorEl) forecastErrorEl.classList.add('hidden');
+
+
+        const [currentWeather, forecastWeather] = await Promise.all([
+            fetchData(`weather/current/${cityId}`),
+            fetchData(`weather/forecast/${cityId}`)
+        ]);
+
+        updateCurrentWeatherUI(currentWeather, cityName);
+        updateForecastUI(forecastWeather);
     }
 
-    // NOVO: Função para popular o dropdown de seleção de cidade para o tempo
     function populateWeatherCitySelect(cities) {
         if (!currentWeatherCitySelectEl || !cities || cities.length === 0) return;
-        
-        currentWeatherCitySelectEl.innerHTML = ''; // Limpa opções antigas
-
+        currentWeatherCitySelectEl.innerHTML = ''; 
         cities.forEach(city => {
             const option = document.createElement('option');
             option.value = city.id;
             option.textContent = city.name;
             currentWeatherCitySelectEl.appendChild(option);
         });
-
-        // Define um valor padrão (ex: sjrp) ou o primeiro da lista
         const defaultCityId = 'sjrp';
         if (cities.some(c => c.id === defaultCityId)) {
             currentWeatherCitySelectEl.value = defaultCityId;
@@ -288,7 +336,6 @@ document.addEventListener('DOMContentLoaded', () => {
             currentWeatherCitySelectEl.value = cities[0].id;
         }
     }
-
 
     // --- Inicialização e Event Listeners ---
     async function initializeApp() {
@@ -327,34 +374,33 @@ document.addEventListener('DOMContentLoaded', () => {
         populateCheckboxes(cityFilterContainer, allCitiesData, 'cityFilter');
         populateCheckboxes(alertTypeFilterContainer, allAlertTypesData, 'alertTypeFilter'); 
         
-        populateWeatherCitySelect(allCitiesData); // NOVO: Popula o dropdown de cidades para o tempo
+        populateWeatherCitySelect(allCitiesData); 
 
         initMap(allCitiesData); 
         await handleApplyFilters(); 
 
-        // Busca e exibe o tempo para a cidade selecionada no novo dropdown (ou padrão)
         if (currentWeatherCitySelectEl.value) {
             const selectedCityForWeather = allCitiesData.find(c => c.id === currentWeatherCitySelectEl.value);
             if (selectedCityForWeather) {
-                 await fetchAndDisplayCurrentWeather(selectedCityForWeather.id, selectedCityForWeather.name);
+                 await fetchAndDisplayWeatherData(selectedCityForWeather.id, selectedCityForWeather.name); // Nome da função alterado
             }
-        } else if (allCitiesData.length > 0) { // Fallback se o select não tiver valor (improvável)
+        } else if (allCitiesData.length > 0) { 
             const defaultCityForWeather = allCitiesData.find(c => c.id === 'sjrp') || allCitiesData[0];
             if (defaultCityForWeather) {
-                currentWeatherCitySelectEl.value = defaultCityForWeather.id; // Define o valor no select
-                await fetchAndDisplayCurrentWeather(defaultCityForWeather.id, defaultCityForWeather.name);
+                currentWeatherCitySelectEl.value = defaultCityForWeather.id; 
+                await fetchAndDisplayWeatherData(defaultCityForWeather.id, defaultCityForWeather.name); // Nome da função alterado
             }
         } else {
             updateCurrentWeatherUI({}, "Nenhuma cidade");
+            updateForecastUI(null); // Limpa previsão se não houver cidades
         }
 
-        // NOVO: Event listener para o dropdown de seleção de cidade do tempo
         if (currentWeatherCitySelectEl) {
             currentWeatherCitySelectEl.addEventListener('change', (event) => {
                 const selectedCityId = event.target.value;
                 const selectedCity = allCitiesData.find(c => c.id === selectedCityId);
                 if (selectedCity) {
-                    fetchAndDisplayCurrentWeather(selectedCity.id, selectedCity.name);
+                    fetchAndDisplayWeatherData(selectedCity.id, selectedCity.name); // Nome da função alterado
                 }
             });
         }
