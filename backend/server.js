@@ -40,10 +40,9 @@ const ALERT_RULES = {
 // Função auxiliar para processar a inserção de um alerta, verificar duplicados e identificar subscritores
 async function processAlertInsertion(alertToInsert, updateCountCallback) {
     try {
-        // Verifica se alert_type_id existe na tabela alert_types
         const typeExists = await db.query('SELECT id FROM alert_types WHERE id = $1', [alertToInsert.alert_type_id]);
         if (typeExists.rows.length === 0) {
-            console.warn(`[Alert Generation] Tipo de alerta ID '${alertToInsert.alert_type_id}' não encontrado na tabela 'alert_types'. Alerta para ${alertToInsert.city_name} não será inserido.`);
+            console.warn(`[Alert Generation] Tipo de alerta ID '${alertToInsert.alert_type_id}' não encontrado. Alerta para ${alertToInsert.city_name} não será inserido.`);
             return;
         }
 
@@ -63,7 +62,6 @@ async function processAlertInsertion(alertToInsert, updateCountCallback) {
             console.log(`[Alert Generation] Alerta GERADO para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}, Data: ${alertToInsert.alert_date}), ID: ${newAlertId}`);
             if (updateCountCallback) updateCountCallback(1);
 
-            // Identificar subscritores para este alerta
             const subscribersQuery = `
                 SELECT u.email 
                 FROM users u
@@ -74,13 +72,7 @@ async function processAlertInsertion(alertToInsert, updateCountCallback) {
             if (subscribersResult.rows.length > 0) {
                 const emails = subscribersResult.rows.map(row => row.email);
                 console.log(`[Notification Prep] Alerta ID ${newAlertId} para ${alertToInsert.city_name} (Data: ${alertToInsert.alert_date}, Tipo: ${alertToInsert.alert_type_id}) deve ser enviado para: ${emails.join(', ')}`);
-                // No futuro, aqui seria chamada a função de envio de e-mail.
-            } else {
-                // console.log(`[Notification Prep] Nenhum subscritor encontrado para alertas em ${alertToInsert.city_name} para o alerta tipo ${alertToInsert.alert_type_id} na data ${alertToInsert.alert_date}.`);
             }
-
-        } else {
-            // console.log(`[Alert Generation] Alerta duplicado para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}) na data ${alertToInsert.alert_date}. Não será inserido.`);
         }
     } catch (dbError) {
         console.error(`[Alert Generation] Erro DB ao inserir/processar alerta para ${alertToInsert.city_name} (Tipo: ${alertToInsert.alert_type_id}):`, dbError.message);
@@ -156,7 +148,7 @@ async function checkWeatherAndGenerateAlerts() {
                 }
             } catch (forecastError) { console.error(`[Alert Generation] Erro PREVISÃO para ${city.name}:`, forecastError.message); }
         }
-        console.log(`[${new Date().toISOString()}] [Alert Generation] Verificação concluída. ${alertsGeneratedCount} novos alertas foram gerados (atuais e futuros).`);
+        console.log(`[${new Date().toISOString()}] [Alert Generation] Verificação concluída. ${alertsGeneratedCount} novos alertas gerados (atuais e futuros).`);
     } catch (error) { console.error(`[${new Date().toISOString()}] [Alert Generation] Erro geral:`, error); }
 }
 
@@ -287,29 +279,38 @@ app.post('/api/subscribe', async (req, res) => {
     const { email, cityIds } = req.body; 
 
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
-        return res.status(400).json({ error: 'Formato de e-mail inválido.' });
+        return res.status(400).json({ error: 'Formato de e-mail inválido.', success: false });
     }
     if (!cityIds || !Array.isArray(cityIds) || cityIds.length === 0) {
-        return res.status(400).json({ error: 'Pelo menos uma cidade deve ser selecionada para subscrição.' });
+        return res.status(400).json({ error: 'Pelo menos uma cidade deve ser selecionada para subscrição.', success: false });
     }
 
-    console.log(`POST /api/subscribe - Tentativa de subscrição para email: ${email}, cidades: ${cityIds.join(',')}`);
+    console.log(`POST /api/subscribe - Tentativa de subscrição/atualização para email: ${email}, cidades: ${cityIds.join(',')}`);
 
     const client = await db.pool.connect(); 
+    let isNewUser = false;
+
     try {
         await client.query('BEGIN'); 
 
+        // 1. Encontrar ou criar o utilizador
         let userResult = await client.query('SELECT id FROM users WHERE email = $1', [email]);
         let userId;
+
         if (userResult.rows.length > 0) {
             userId = userResult.rows[0].id;
-            // console.log(`Utilizador encontrado com ID: ${userId} para email: ${email}`);
+            console.log(`Utilizador existente encontrado com ID: ${userId} para email: ${email}. Atualizando subscrições...`);
+            // Se o utilizador existe, remove todas as subscrições antigas dele antes de adicionar as novas
+            await client.query('DELETE FROM user_city_subscriptions WHERE user_id = $1', [userId]);
+            console.log(`Subscrições antigas para user_id ${userId} removidas.`);
         } else {
             const insertUserResult = await client.query('INSERT INTO users (email) VALUES ($1) RETURNING id', [email]);
             userId = insertUserResult.rows[0].id;
+            isNewUser = true;
             console.log(`Novo utilizador criado com ID: ${userId} para email: ${email}`);
         }
 
+        // 2. Adicionar as novas subscrições de cidade
         let newSubscriptionsCount = 0;
         for (const cityId of cityIds) {
             const cityExists = await client.query('SELECT id FROM cities WHERE id = $1', [cityId]);
@@ -317,29 +318,38 @@ app.post('/api/subscribe', async (req, res) => {
                 console.warn(`Tentativa de subscrever cidade inexistente (ID: ${cityId}) para o utilizador ${email}. A ignorar esta cidade.`);
                 continue; 
             }
-            try {
-                await client.query(
-                    'INSERT INTO user_city_subscriptions (user_id, city_id) VALUES ($1, $2)',
-                    [userId, cityId]
-                );
-                // console.log(`Utilizador ${userId} subscrito à cidade ${cityId}.`);
-                newSubscriptionsCount++;
-            } catch (error) {
-                if (error.code === '23505') { 
-                    // console.log(`Utilizador ${userId} já está subscrito à cidade ${cityId}.`);
-                } else {
-                    throw error; 
-                }
-            }
+            // Como já limpamos as subscrições antigas para utilizadores existentes, podemos inserir diretamente.
+            // A restrição de chave primária composta (user_id, city_id) ainda protegeria contra duplicados
+            // se não tivéssemos limpado, mas limpar primeiro simplifica.
+            await client.query(
+                'INSERT INTO user_city_subscriptions (user_id, city_id) VALUES ($1, $2)',
+                [userId, cityId]
+            );
+            newSubscriptionsCount++;
         }
+        console.log(`${newSubscriptionsCount} novas subscrições adicionadas para user_id ${userId}.`);
+
         await client.query('COMMIT'); 
-        res.status(201).json({ message: `Subscrição processada para ${email}. Novas subscrições adicionadas: ${newSubscriptionsCount}.` });
+        
+        const message = isNewUser ? 
+            `Subscrição realizada com sucesso para ${email} em ${newSubscriptionsCount} cidade(s).` :
+            `Preferências de alerta para ${email} atualizadas com ${newSubscriptionsCount} cidade(s) subscritas.`;
+        
+        res.status(isNewUser ? 201 : 200).json({ message: message, success: true });
+    
     } catch (error) {
-        await client.query('ROLLBACK'); 
-        console.error('Erro durante o processo de subscrição:', error);
-        res.status(500).json({ error: 'Erro ao processar a subscrição.' });
+        try {
+            await client.query('ROLLBACK');
+            console.log('ROLLBACK bem-sucedido devido a erro na transação.');
+        } catch (rollbackError) {
+            console.error('Erro ao tentar executar ROLLBACK:', rollbackError.message);
+        }
+        console.error('Erro final durante o processo de subscrição:', error.message, error.stack);
+        res.status(500).json({ error: 'Erro ao processar a subscrição.', details: error.message, success: false });
+    
     } finally {
         client.release(); 
+        console.log(`Cliente do banco de dados liberado.`);
     }
 });
 

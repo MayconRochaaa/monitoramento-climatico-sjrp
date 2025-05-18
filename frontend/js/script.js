@@ -1,7 +1,7 @@
 // frontend/js/script.js
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Elementos da DOM (sem alterações)
+    // Elementos da DOM
     const menuBtn = document.getElementById('menuBtn');
     const filtersSidebar = document.getElementById('filtersSidebar');
     const currentYearEl = document.getElementById('currentYear');
@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const showAllAlertsLink = document.getElementById('showAllAlertsLink');
     const mapPlaceholder = document.getElementById('mapPlaceholder'); 
 
+    // Elementos do Card de Condições Atuais
     const currentWeatherCard = document.getElementById('currentWeatherCard');
     const currentWeatherCitySelectEl = document.getElementById('currentWeatherCitySelect');
     const currentWeatherCityNameEl = document.getElementById('currentWeatherCityName');
@@ -33,9 +34,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentWeatherDataEl = document.getElementById('currentWeatherData');
     const currentWeatherErrorEl = document.getElementById('currentWeatherError');
 
-    const weatherForecastContainerEl = document.getElementById('weatherForecastContainer');
+    // Elementos para Previsão do Tempo
+    const weatherForecastSectionEl = document.getElementById('weatherForecastSection'); 
     const forecastDaysContainerEl = document.getElementById('forecastDays');
     const forecastErrorEl = document.getElementById('forecastError');
+
+    // Elementos para Subscrição e Gaveta
+    const openSubscriptionDrawerBtn = document.getElementById('openSubscriptionDrawerBtn');
+    const subscriptionDrawerEl = document.getElementById('subscriptionDrawer');
+    const drawerOverlayEl = document.getElementById('drawerOverlay');
+    const closeSubscriptionDrawerBtn = document.getElementById('closeSubscriptionDrawerBtn');
+    const subscriptionEmailInput = document.getElementById('subscriptionEmail');
+    const subscriptionCityCheckboxesContainer = document.getElementById('subscriptionCityCheckboxes');
+    const subscribeBtn = document.getElementById('subscribeBtn');
+    const subscriptionFeedbackEl = document.getElementById('subscriptionFeedback');
 
     let mapInstance = null; 
     let alertMarkersClusterGroup = null; 
@@ -47,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let allAlertTypesData = []; 
     let currentDisplayedAlerts = []; 
 
-    // --- Funções de Data (sem alterações) ---
+    // --- Funções de Data ---
     const formatDate = (dateObject) => { 
         if (!dateObject) return null;
         if (typeof dayjs === 'function' && dateObject instanceof dayjs) {
@@ -95,7 +107,6 @@ document.addEventListener('DOMContentLoaded', () => {
         content += '</ul></div>';
         return content;
     }
-
     function initMap(citiesToMark = []) { 
         if (mapPlaceholder && !mapInstance) { 
             if (mapPlaceholder.clientHeight === 0) { mapPlaceholder.style.height = '400px'; }
@@ -107,14 +118,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
                 maxZoom: 18,
             }).addTo(mapInstance);
-            
             baseCityMarkers = {}; 
             citiesToMark.forEach(city => { 
                 if(city.coords) {
-                    const marker = L.marker(city.coords, { 
-                        opacity: 0.7, 
-                        title: city.name 
-                    })
+                    const marker = L.marker(city.coords, { opacity: 0.7, title: city.name })
                         .addTo(mapInstance)
                         .on('click', function(e) { 
                             if (this.getPopup()) { this.unbindPopup(); }
@@ -123,41 +130,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     baseCityMarkers[city.id] = marker; 
                 }
             });
-            
             alertMarkersClusterGroup = L.markerClusterGroup({
-                spiderfyOnMaxZoom: false, // Não expande os marcadores no zoom máximo do cluster
-                zoomToBoundsOnClick: false, // Não dá zoom ao clicar, para podermos abrir o popup
-                disableClusteringAtZoom: 13 // Opcional: desativa o clustering a partir de um certo nível de zoom
+                spiderfyOnMaxZoom: false, zoomToBoundsOnClick: false, disableClusteringAtZoom: 13 
             });
-
             alertMarkersClusterGroup.on('clusterclick', function (a) {
-                // a.layer é o cluster que foi clicado
                 const childMarkers = a.layer.getAllChildMarkers();
                 if (childMarkers.length > 0) {
-                    // Assume que todos os marcadores num cluster próximo são da mesma cidade
-                    // (especialmente se as coordenadas dos alertas forem as mesmas da cidade)
-                    const firstMarkerData = childMarkers[0].options.customData; // Pega os dados customizados
+                    const firstMarkerData = childMarkers[0].options.customData; 
                     if (firstMarkerData && firstMarkerData.cityId) {
                         const popupContent = createCityAlertsPopupContent(firstMarkerData.cityId, firstMarkerData.cityName);
-                        L.popup()
-                            .setLatLng(a.layer.getLatLng()) // Posição do cluster
-                            .setContent(popupContent)
-                            .openOn(mapInstance);
-                    } else {
-                        // Fallback se não houver customData (improvável com a nova lógica)
-                        // Ou se quiser um comportamento diferente para clusters mistos (mais complexo)
-                        mapInstance.setView(a.layer.getLatLng(), mapInstance.getZoom() + 1); // Zoom simples
-                    }
+                        L.popup().setLatLng(a.layer.getLatLng()).setContent(popupContent).openOn(mapInstance);
+                    } else { mapInstance.setView(a.layer.getLatLng(), mapInstance.getZoom() + 1); }
                 }
-                 // Impede o comportamento padrão de zoom do cluster se quisermos apenas o popup
-                // a.originalEvent.preventDefault(); // Pode não ser necessário com zoomToBoundsOnClick: false
             });
-
             mapInstance.addLayer(alertMarkersClusterGroup);
             mapInstance.whenReady(() => { setTimeout(() => { mapInstance.invalidateSize(); }, 100); });
         }
     }
-    
     function updateBaseCityMarkersOpacity(selectedCityIds = []) {
         const defaultOpacity = 0.7; const lowOpacity = 0.2;
         allCitiesData.forEach(city => { 
@@ -168,11 +157,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-
     function updateMapAlerts(alertsToDisplay) {
         if (!mapInstance || !alertMarkersClusterGroup) return; 
         alertMarkersClusterGroup.clearLayers(); 
-
         alertsToDisplay.forEach(alertData => {
             if (alertData.coords) {
                 const alertTypeInfo = allAlertTypesData.find(type => type.id === alertData.typeId) || { icon: 'fas fa-info-circle', colorClass: 'alert-card-blue' }; 
@@ -180,33 +167,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (alertTypeInfo.colorClass === 'alert-card-red') markerColor = '#ef4444';
                 else if (alertTypeInfo.colorClass === 'alert-card-yellow') markerColor = '#f59e0b';
                 else if (alertTypeInfo.colorClass === 'alert-card-blue') markerColor = '#3b82f6';
-                
                 const iconHtml = `<i class="${alertTypeInfo.icon || 'fas fa-map-marker-alt'}" style="color: ${markerColor}; font-size: 28px; -webkit-text-stroke: 1.5px white; text-stroke: 1.5px white; text-shadow: 0 0 3px rgba(0,0,0,0.5);"></i>`;
-                const customIcon = L.divIcon({ 
-                    html: iconHtml, className: 'custom-leaflet-alert-div-icon', 
-                    iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] 
-                });
-
-                // Adiciona dados customizados ao marcador para uso no evento clusterclick
+                const customIcon = L.divIcon({ html: iconHtml, className: 'custom-leaflet-alert-div-icon', iconSize: [30, 30], iconAnchor: [15, 30], popupAnchor: [0, -28] });
                 const marker = L.marker(alertData.coords, { 
-                    icon: customIcon, 
-                    title: `${alertData.city} - ${alertData.type}`,
-                    customData: { // NOVO: Armazena dados relevantes no marcador
-                        cityId: alertData.cityId,
-                        cityName: alertData.city
-                    }
+                    icon: customIcon, title: `${alertData.city} - ${alertData.type}`,
+                    customData: { cityId: alertData.cityId, cityName: alertData.city }
                 }).on('click', function(e) { 
-                    // Para marcadores individuais (não clusterizados ou quando o cluster é desativado)
                     if (this.getPopup()) { this.unbindPopup(); }
                     this.bindPopup(createCityAlertsPopupContent(alertData.cityId, alertData.city)).openPopup();
-                    L.DomEvent.stopPropagation(e); // Impede que o clique no marcador propague para o cluster se estiver sob um
+                    L.DomEvent.stopPropagation(e); 
                 });
                 alertMarkersClusterGroup.addLayer(marker); 
             }
         });
     }
 
-    // --- Funções para Filtros Acordeão e Checkboxes (sem alterações) ---
+    // --- Funções para Filtros Acordeão e Checkboxes ---
     function setupAccordion(headerElement, containerElement) {
         if (!headerElement || !containerElement) return;
         const icon = headerElement.querySelector('i.fas.accordion-icon');
@@ -219,8 +195,11 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
-    function populateCheckboxes(containerElement, items, groupName) {
-        if (!containerElement) return;
+    function populateCheckboxes(containerElement, items, groupName, isSubscription = false) {
+        if (!containerElement) {
+            console.error(`Contêiner para ${groupName} (subscrição: ${isSubscription}) não encontrado.`);
+            return;
+        }
         containerElement.innerHTML = ''; 
         if (!items || items.length === 0) { 
             containerElement.innerHTML = `<p class="text-xs text-gray-500">Nenhuma opção disponível.</p>`;
@@ -228,8 +207,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         items.forEach(item => {
             const div = document.createElement('div'); div.className = 'flex items-center';
-            const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.id = `${groupName}-${item.id}`; checkbox.name = groupName; checkbox.value = item.id; checkbox.className = 'h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500';
-            const label = document.createElement('label'); label.htmlFor = `${groupName}-${item.id}`; label.textContent = item.name; label.className = 'ml-2 block text-sm text-gray-900 cursor-pointer';
+            const checkbox = document.createElement('input'); checkbox.type = 'checkbox';
+            const currentGroupName = isSubscription ? `sub-${groupName}` : groupName;
+            checkbox.id = `${currentGroupName}-${item.id}`;
+            checkbox.name = currentGroupName; 
+            checkbox.value = item.id; 
+            checkbox.className = 'h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500';
+            const label = document.createElement('label'); label.htmlFor = `${currentGroupName}-${item.id}`; label.textContent = item.name; label.className = 'ml-2 block text-sm text-gray-900 cursor-pointer';
             div.appendChild(checkbox); div.appendChild(label); containerElement.appendChild(div);
         });
     }
@@ -240,7 +224,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return selectedValues;
     }
 
-    // --- Funções de Exibição de Alertas (sem alterações) ---
+    // --- Funções de Exibição de Alertas ---
     function createAlertCard(alertData) {
         const alertTypeInfo = allAlertTypesData.find(type => type.id === alertData.typeId) || { icon: 'fas fa-info-circle', colorClass: 'alert-card-blue' }; 
         const card = document.createElement('div'); card.className = `${alertTypeInfo.colorClass} p-3 rounded-md shadow`;
@@ -262,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
         updateMapAlerts(alertsToDisplay); 
     }
     
-    // --- Lógica de Filtragem (sem alterações) ---
+    // --- Lógica de Filtragem ---
     async function handleApplyFilters() { 
         let startDateAPI = null; let endDateAPI = null;
         if (datePicker && datePicker.getStartDate()) {
@@ -290,31 +274,44 @@ document.addEventListener('DOMContentLoaded', () => {
         handleApplyFilters(); 
     }
 
-    // --- Função para buscar dados da API (sem alterações) ---
-    async function fetchData(endpoint) {
+    // --- Função para buscar dados da API ---
+    async function fetchData(endpoint, options = {}) { 
         try {
-            const response = await fetch(`${API_BASE_URL}/${endpoint}`);
-            if (!response.ok) { throw new Error(`Erro HTTP: ${response.status} ao buscar ${endpoint}`); }
+            const response = await fetch(`${API_BASE_URL}/${endpoint}`, options); 
+            if (!response.ok) { 
+                const errorData = await response.json().catch(() => ({ error: `Erro HTTP: ${response.status}` }));
+                throw new Error(errorData.error || `Erro HTTP: ${response.status} ao processar ${endpoint}`);
+            }
+            if (response.status === 201 && response.headers.get("content-length") === "0") {
+                 return { success: true, message: 'Operação bem-sucedida.'};
+            }
+            if (response.status === 204) {
+                 return { success: true, message: 'Operação bem-sucedida (sem conteúdo).'};
+            }
             return await response.json();
         } catch (error) {
-            console.error(`Falha ao buscar dados de ${endpoint}:`, error);
-            if (endpoint.startsWith('alertas')) alertsListContainer.innerHTML = '<p class="text-xs text-red-500">Erro ao carregar alertas.</p>';
-            else if (endpoint === 'cidades' && cityFilterContainer) cityFilterContainer.innerHTML = '<p class="text-xs text-red-500">Erro ao carregar cidades.</p>';
-            else if (endpoint === 'tipos-alerta' && alertTypeFilterContainer) alertTypeFilterContainer.innerHTML = '<p class="text-xs text-red-500">Erro ao carregar tipos.</p>';
+            console.error(`Falha ao processar ${endpoint}:`, error.message); 
+            if (endpoint.startsWith('alertas') && alertsListContainer) alertsListContainer.innerHTML = `<p class="text-xs text-red-500">${error.message}</p>`;
+            else if (endpoint === 'cidades' && cityFilterContainer) cityFilterContainer.innerHTML = `<p class="text-xs text-red-500">${error.message}</p>`;
+            else if (endpoint === 'tipos-alerta' && alertTypeFilterContainer) alertTypeFilterContainer.innerHTML = `<p class="text-xs text-red-500">${error.message}</p>`;
             else if (endpoint.startsWith('weather/current') && currentWeatherErrorEl) {
                 currentWeatherDataEl.classList.add('hidden');
                 currentWeatherErrorEl.classList.remove('hidden');
-                currentWeatherErrorEl.textContent = 'Erro ao carregar dados meteorológicos.';
+                currentWeatherErrorEl.textContent = error.message;
             } else if (endpoint.startsWith('weather/forecast') && forecastErrorEl) { 
-                forecastDaysContainerEl.innerHTML = ''; 
-                forecastErrorEl.textContent = 'Erro ao carregar previsão do tempo.';
-                forecastErrorEl.classList.remove('hidden');
+                if(forecastDaysContainerEl) forecastDaysContainerEl.innerHTML = ''; 
+                if(forecastErrorEl) {
+                    forecastErrorEl.textContent = error.message;
+                    forecastErrorEl.classList.remove('hidden');
+                }
+            } else if (endpoint === 'subscribe' && subscriptionFeedbackEl) {
+                // Erro já tratado no handleSubscription, mas pode adicionar um fallback aqui se necessário
             }
-            return []; 
+            return { error: error.message, success: false }; 
         }
     }
 
-    // --- Funções para Condições Atuais e Previsão (sem alterações) ---
+    // --- Funções para Condições Atuais e Previsão ---
     function updateCurrentWeatherUI(weatherData, cityName) {
         if (!currentWeatherCard) return;
         if (!weatherData || Object.keys(weatherData).length === 0) {
@@ -389,6 +386,78 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- Funções para Gaveta de Subscrição ---
+    function openSubscriptionDrawer() {
+        if (subscriptionDrawerEl && drawerOverlayEl) {
+            subscriptionDrawerEl.classList.add('open');
+            drawerOverlayEl.classList.remove('hidden');
+            document.body.style.overflow = 'hidden'; 
+        }
+    }
+    function closeSubscriptionDrawer() {
+        if (subscriptionDrawerEl && drawerOverlayEl) {
+            subscriptionDrawerEl.classList.remove('open');
+            drawerOverlayEl.classList.add('hidden');
+            document.body.style.overflow = ''; 
+        }
+    }
+
+    // --- Funções para Subscrição ---
+    function displaySubscriptionFeedback(message, isSuccess) {
+        if (!subscriptionFeedbackEl) return;
+        subscriptionFeedbackEl.textContent = message;
+        subscriptionFeedbackEl.classList.remove('hidden', 'subscription-success', 'subscription-error');
+        if (isSuccess) {
+            subscriptionFeedbackEl.classList.add('subscription-success');
+        } else {
+            subscriptionFeedbackEl.classList.add('subscription-error');
+        }
+        setTimeout(() => {
+            subscriptionFeedbackEl.classList.add('hidden');
+        }, 5000);
+    }
+    async function handleSubscription(event) {
+        event.preventDefault(); 
+        if (!subscriptionEmailInput || !subscribeBtn) return;
+
+        const email = subscriptionEmailInput.value.trim();
+        const selectedCityIds = getSelectedCheckboxValues('sub-cityFilter'); 
+
+        if (!email || !/^\S+@\S+\.\S+$/.test(email)) {
+            displaySubscriptionFeedback('Por favor, insira um e-mail válido.', false);
+            return;
+        }
+        if (selectedCityIds.length === 0) {
+            displaySubscriptionFeedback('Por favor, selecione pelo menos uma cidade para subscrever.', false);
+            return;
+        }
+
+        subscribeBtn.disabled = true;
+        subscribeBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i> A subscrever...';
+        subscriptionFeedbackEl.classList.add('hidden'); 
+
+        const subscriptionData = { email: email, cityIds: selectedCityIds };
+
+        const result = await fetchData('subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', },
+            body: JSON.stringify(subscriptionData),
+        });
+
+        subscribeBtn.disabled = false;
+        subscribeBtn.innerHTML = '<i class="fas fa-envelope-open-text mr-2"></i> Subscrever Agora';
+
+        if (result && result.success && result.message) { 
+            displaySubscriptionFeedback(result.message, true);
+            subscriptionEmailInput.value = ''; 
+            document.querySelectorAll('input[name="sub-cityFilter"]:checked').forEach(cb => cb.checked = false); 
+        } else if (result && result.error) {
+            displaySubscriptionFeedback(`Erro: ${result.error}`, false);
+        } else {
+            displaySubscriptionFeedback('Ocorreu um erro desconhecido ao processar a subscrição.', false);
+        }
+    }
+
     // --- Inicialização e Event Listeners ---
     async function initializeApp() {
         if (menuBtn && filtersSidebar) {
@@ -398,20 +467,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 setTimeout(() => { if (mapInstance) { mapInstance.invalidateSize(); } }, 300); 
             });
         }
-
-        if (currentYearEl) {
-            currentYearEl.textContent = new Date().getFullYear();
-        }
-        
+        if (currentYearEl) { currentYearEl.textContent = new Date().getFullYear(); }
         if (dateRangeFilterInput) {
             datePicker = new Litepicker({
-                element: dateRangeFilterInput,
-                singleMode: false, allowRepick: true, format: 'DD/MM/YYYY', separator: ' - ', numberOfMonths: 1, lang: 'pt-BR', 
+                element: dateRangeFilterInput, singleMode: false, allowRepick: true, format: 'DD/MM/YYYY', 
+                separator: ' - ', numberOfMonths: 1, lang: 'pt-BR', 
                 buttonText: { previousMonth: `<i class="fas fa-chevron-left"></i>`, nextMonth: `<i class="fas fa-chevron-right"></i>`, reset: `<i class="fas fa-undo"></i>`, apply: 'Aplicar', cancel: 'Cancelar' },
                 tooltipText: { one: 'dia', other: 'dias' },
             });
         }
-        
         setupAccordion(cityFilterHeader, cityFilterContainer);
         setupAccordion(alertTypeFilterHeader, alertTypeFilterContainer);
 
@@ -419,19 +483,20 @@ document.addEventListener('DOMContentLoaded', () => {
             fetchData('cidades'),
             fetchData('tipos-alerta') 
         ]);
-
         allCitiesData = cities;
         allAlertTypesData = alertTypes; 
 
         populateCheckboxes(cityFilterContainer, allCitiesData, 'cityFilter');
         populateCheckboxes(alertTypeFilterContainer, allAlertTypesData, 'alertTypeFilter'); 
-        
         populateWeatherCitySelect(allCitiesData); 
+        if (subscriptionCityCheckboxesContainer) {
+            populateCheckboxes(subscriptionCityCheckboxesContainer, allCitiesData, 'cityFilter', true); 
+        }
 
         initMap(allCitiesData); 
         await handleApplyFilters(); 
 
-        if (currentWeatherCitySelectEl.value) {
+        if (currentWeatherCitySelectEl && currentWeatherCitySelectEl.value) {
             const selectedCityForWeather = allCitiesData.find(c => c.id === currentWeatherCitySelectEl.value);
             if (selectedCityForWeather) {
                  await fetchAndDisplayWeatherData(selectedCityForWeather.id, selectedCityForWeather.name);
@@ -439,7 +504,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (allCitiesData.length > 0) { 
             const defaultCityForWeather = allCitiesData.find(c => c.id === 'sjrp') || allCitiesData[0];
             if (defaultCityForWeather) {
-                currentWeatherCitySelectEl.value = defaultCityForWeather.id; 
+                if(currentWeatherCitySelectEl) currentWeatherCitySelectEl.value = defaultCityForWeather.id; 
                 await fetchAndDisplayWeatherData(defaultCityForWeather.id, defaultCityForWeather.name);
             }
         } else {
@@ -451,24 +516,18 @@ document.addEventListener('DOMContentLoaded', () => {
             currentWeatherCitySelectEl.addEventListener('change', (event) => {
                 const selectedCityId = event.target.value;
                 const selectedCity = allCitiesData.find(c => c.id === selectedCityId);
-                if (selectedCity) {
-                    fetchAndDisplayWeatherData(selectedCity.id, selectedCity.name); 
-                }
+                if (selectedCity) { fetchAndDisplayWeatherData(selectedCity.id, selectedCity.name); }
             });
         }
-
-        if (applyFiltersBtn) {
-            applyFiltersBtn.addEventListener('click', handleApplyFilters);
-        }
-        if (clearFiltersBtn) { 
-            clearFiltersBtn.addEventListener('click', resetAllFilters);
-        }
+        if (applyFiltersBtn) { applyFiltersBtn.addEventListener('click', handleApplyFilters); }
+        if (clearFiltersBtn) { clearFiltersBtn.addEventListener('click', resetAllFilters); }
         if (showAllAlertsLink) { 
-            showAllAlertsLink.addEventListener('click', (event) => {
-                event.preventDefault(); 
-                resetAllFilters();
-            });
+            showAllAlertsLink.addEventListener('click', (event) => { event.preventDefault(); resetAllFilters(); });
         }
+        if (subscribeBtn) { subscribeBtn.addEventListener('click', handleSubscription); }
+        if (openSubscriptionDrawerBtn) { openSubscriptionDrawerBtn.addEventListener('click', openSubscriptionDrawer); }
+        if (closeSubscriptionDrawerBtn) { closeSubscriptionDrawerBtn.addEventListener('click', closeSubscriptionDrawer); }
+        if (drawerOverlayEl) { drawerOverlayEl.addEventListener('click', closeSubscriptionDrawer); }
     }
 
     initializeApp(); 
