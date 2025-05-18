@@ -10,7 +10,7 @@ const nodemailer = require('nodemailer');
 const db = require('./config/db');
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(cors());
@@ -26,7 +26,7 @@ const transporter = nodemailer.createTransport({
         pass: EMAIL_PASS,
     },
     tls: {
-        rejectUnauthorized: false
+        //rejectUnauthorized: false
     }
 });
 
@@ -100,8 +100,8 @@ const formatDateToYYYYMMDD = (date) => {
 };
 
 const ALERT_RULES = {
-    TEMP_THRESHOLD_MAX_CURRENT: 40,
-    TEMP_THRESHOLD_MAX_FORECAST: 38,
+    TEMP_THRESHOLD_MAX_CURRENT: 10,
+    TEMP_THRESHOLD_MAX_FORECAST: 10,
     RAIN_THRESHOLD_CURRENT: 20,
     POP_THRESHOLD_FORECAST: 0.6,
     WIND_THRESHOLD_MS: 11.11,
@@ -485,7 +485,6 @@ cron.schedule('0 * * * *', () => {
    checkWeatherAndGenerateAlerts();
 });
 console.log(`[${new Date().toISOString()}] [Scheduler] Agendador configurado para rodar a cada hora.`);
-
 // checkWeatherAndGenerateAlerts(); 
 
 app.listen(port, () => {
