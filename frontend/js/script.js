@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
         API_BASE_URL = 'http://localhost:3000/api';
     } else {
         // ATENÇÃO: Substitua pelo URL real do seu backend em produção
-        API_BASE_URL = 'https://monitoramento-climatico-api.onrender.com'; // Exemplo: substitua!
+        API_BASE_URL = 'https://monitoramento-climatico-api.onrender.com/api'; // Exemplo: substitua!
     }
     console.log('API Base URL configurada para:', API_BASE_URL);
     console.log('Hostname atual:', window.location.hostname);
